@@ -185,6 +185,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const [imageCount, setImageCount] = useState("1");
   const [imageMode, setImageMode] = useState<ImageConversationMode>("generate");
   const [imageSize, setImageSize] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
   const [referenceImages, setReferenceImages] = useState<StoredReferenceImage[]>([]);
@@ -380,6 +381,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const clearComposerInputs = useCallback(() => {
     setImagePrompt("");
     setImageCount("1");
+    setIsPublic(false);
     setReferenceImageFiles([]);
     setReferenceImages([]);
     if (fileInputRef.current) {
@@ -588,8 +590,12 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
           try {
             const data =
               queuedTurn.mode === "edit"
-                ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size)
-                : await generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size);
+                ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size, {
+                    isPublic: queuedTurn.isPublic,
+                  })
+                : await generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size, {
+                    isPublic: queuedTurn.isPublic,
+                  });
             const first = data.data?.[0];
             if (!first?.b64_json) {
               throw new Error("未返回图片数据");
@@ -757,6 +763,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
       referenceImages: imageMode === "edit" ? referenceImages : [],
       count: parsedCount,
       size: imageSize,
+      isPublic,
       images: Array.from({ length: parsedCount }, (_, index) => ({
         id: `${turnId}-${index}`,
         status: "loading" as const,
@@ -886,6 +893,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             prompt={imagePrompt}
             imageCount={imageCount}
             imageSize={imageSize}
+            isPublic={isPublic}
             availableQuota={availableQuota}
             activeTaskCount={activeTaskCount}
             referenceImages={referenceImages}
@@ -895,6 +903,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             onPromptChange={setImagePrompt}
             onImageCountChange={setImageCount}
             onImageSizeChange={setImageSize}
+            onPublicChange={setIsPublic}
             onSubmit={handleSubmit}
             onPickReferenceImage={() => fileInputRef.current?.click()}
             onReferenceImageChange={handleReferenceImageChange}

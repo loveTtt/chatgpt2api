@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 type LightboxImage = {
   id: string;
   src: string;
+  prompt?: string;
+  revisedPrompt?: string;
+  downloadName?: string;
 };
 
 type ImageLightboxProps = {
@@ -59,7 +62,7 @@ export function ImageLightbox({
     if (!current) return;
     const link = document.createElement("a");
     link.href = current.src;
-    link.download = `image-${current.id}.png`;
+    link.download = current.downloadName || `image-${current.id}.png`;
     link.click();
   }, [current]);
 
@@ -135,6 +138,22 @@ export function ImageLightbox({
               <ChevronRight className="size-5" />
             </button>
           )}
+          {current.prompt || current.revisedPrompt ? (
+            <div className="absolute inset-x-4 bottom-4 z-10 mx-auto max-w-3xl rounded-3xl border border-white/10 bg-black/60 p-4 text-white shadow-2xl backdrop-blur-md">
+              {current.prompt ? (
+                <div className="text-sm leading-6 text-white/90">
+                  <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-white/45">Prompt</div>
+                  {current.prompt}
+                </div>
+              ) : null}
+              {current.revisedPrompt ? (
+                <div className="mt-3 border-t border-white/10 pt-3 text-xs leading-5 text-white/65">
+                  <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-white/35">Revised</div>
+                  {current.revisedPrompt}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

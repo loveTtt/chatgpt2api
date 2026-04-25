@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from api import accounts, ai, system
+from api import accounts, ai, public_works, system
 from api.support import resolve_web_asset, start_limited_account_watcher
 from services.account_service import account_service
 from services.chatgpt_service import ChatGPTService
@@ -39,6 +39,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(ai.create_router(chatgpt_service))
     app.include_router(accounts.create_router())
+    app.include_router(public_works.create_router())
     app.include_router(system.create_router(app_version))
     if config.images_dir.exists():
         app.mount("/images", StaticFiles(directory=str(config.images_dir)), name="images")

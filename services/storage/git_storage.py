@@ -22,6 +22,7 @@ class GitStorageBackend(StorageBackend):
         branch: str = "main",
         file_path: str = "accounts.json",
         auth_keys_file_path: str = "auth_keys.json",
+        public_works_file_path: str = "public_works.json",
         local_cache_dir: Path | None = None,
     ):
         self.repo_url = repo_url
@@ -29,6 +30,7 @@ class GitStorageBackend(StorageBackend):
         self.branch = branch
         self.file_path = file_path
         self.auth_keys_file_path = auth_keys_file_path
+        self.public_works_file_path = public_works_file_path
         
         # 本地缓存目录
         if local_cache_dir is None:
@@ -117,6 +119,22 @@ class GitStorageBackend(StorageBackend):
             print(f"[git-storage] save failed: {e}")
             raise e
 
+    def load_public_works(self) -> list[dict[str, Any]]:
+        """从 Git 仓库加载公开作品数据"""
+        try:
+            return self._load_json_file(self.public_works_file_path)
+        except Exception as e:
+            print(f"[git-storage] load failed: {e}")
+            raise
+
+    def save_public_works(self, items: list[dict[str, Any]]) -> None:
+        """保存公开作品数据到 Git 仓库"""
+        try:
+            self._save_json_file(self.public_works_file_path, items, "Update public works data")
+        except Exception as e:
+            print(f"[git-storage] save failed: {e}")
+            raise e
+
     def _load_json_file(self, file_path: str) -> list[dict[str, Any]]:
         data = self._load_json_value(file_path)
         return data if isinstance(data, list) else []
@@ -152,6 +170,7 @@ class GitStorageBackend(StorageBackend):
                 "branch": self.branch,
                 "file_path": self.file_path,
                 "auth_keys_file_path": self.auth_keys_file_path,
+                "public_works_file_path": self.public_works_file_path,
                 "last_commit": repo.head.commit.hexsha[:8],
             }
         except Exception as e:
@@ -170,6 +189,7 @@ class GitStorageBackend(StorageBackend):
             "branch": self.branch,
             "file_path": self.file_path,
             "auth_keys_file_path": self.auth_keys_file_path,
+            "public_works_file_path": self.public_works_file_path,
         }
 
     @staticmethod

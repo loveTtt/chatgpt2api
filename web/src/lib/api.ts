@@ -4,6 +4,19 @@ export type AccountType = "Free" | "Plus" | "ProLite" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
 export type ImageModel = "auto" | "gpt-image-1" | "gpt-image-2";
 export type AuthRole = "admin" | "user";
+export type PublicWork = {
+  id: string;
+  prompt: string;
+  revised_prompt: string;
+  image_url: string;
+  width: number;
+  height: number;
+  created_at: string;
+};
+
+type ImageRequestOptions = {
+  isPublic?: boolean;
+};
 
 export type Account = {
   id: string;
@@ -149,7 +162,7 @@ export async function updateAccount(
   });
 }
 
-export async function generateImage(prompt: string, model?: ImageModel, size?: string) {
+export async function generateImage(prompt: string, model?: ImageModel, size?: string, options: ImageRequestOptions = {}) {
   return httpRequest<{ created: number; data: Array<{ b64_json: string; revised_prompt?: string }> }>(
     "/v1/images/generations",
     {
@@ -158,6 +171,7 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
         prompt,
         ...(model ? { model } : {}),
         ...(size ? { size } : {}),
+        ...(options.isPublic ? { is_public: true } : {}),
         n: 1,
         response_format: "b64_json",
       },
@@ -165,7 +179,7 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
   );
 }
 
-export async function editImage(files: File | File[], prompt: string, model?: ImageModel, size?: string) {
+export async function editImage(files: File | File[], prompt: string, model?: ImageModel, size?: string, options: ImageRequestOptions = {}) {
   const formData = new FormData();
   const uploadFiles = Array.isArray(files) ? files : [files];
 
@@ -179,6 +193,9 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   if (size) {
     formData.append("size", size);
   }
+  if (options.isPublic) {
+    formData.append("is_public", "true");
+  }
   formData.append("n", "1");
 
   return httpRequest<{ created: number; data: Array<{ b64_json: string; revised_prompt?: string }> }>(
@@ -188,6 +205,11 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
       body: formData,
     },
   );
+}
+
+export async function fetchPublicWorks(limit = 60) {
+  const search = new URLSearchParams({ limit: String(limit) });
+  return httpRequest<{ items: PublicWork[] }>(`/api/public-works?${search.toString()}`);
 }
 
 export async function fetchSettingsConfig() {

@@ -9,6 +9,9 @@ import type { ImageConversation, ImageTurnStatus, StoredImage, StoredReferenceIm
 export type ImageLightboxItem = {
   id: string;
   src: string;
+  prompt?: string;
+  revisedPrompt?: string;
+  downloadName?: string;
 };
 
 type ImageResultsProps = {
@@ -60,7 +63,7 @@ export function ImageResults({
         }));
         const successfulTurnImages = turn.images.flatMap((image) =>
           image.status === "success" && image.b64_json
-            ? [{ id: image.id, src: `data:image/png;base64,${image.b64_json}` }]
+            ? [{ id: image.id, src: `data:image/png;base64,${image.b64_json}`, prompt: turn.prompt }]
             : [],
         );
 

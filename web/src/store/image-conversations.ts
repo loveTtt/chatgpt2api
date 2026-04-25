@@ -32,6 +32,7 @@ export type ImageTurn = {
   images: StoredImage[];
   createdAt: string;
   status: ImageTurnStatus;
+  isPublic?: boolean;
   error?: string;
 };
 
@@ -134,6 +135,7 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
       turn.status === "error"
         ? turn.status
         : derivedStatus,
+    isPublic: turn.isPublic === true,
     error: typeof turn.error === "string" ? turn.error : undefined,
   };
 }

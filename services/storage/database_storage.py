@@ -30,6 +30,15 @@ class AuthKeyModel(Base):
     data = Column(Text, nullable=False)
 
 
+class PublicWorkModel(Base):
+    """公开作品数据模型"""
+    __tablename__ = "public_works"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    work_id = Column(String(255), unique=True, nullable=False, index=True)
+    data = Column(Text, nullable=False)
+
+
 class DatabaseStorageBackend(StorageBackend):
     """数据库存储后端（支持 SQLite、PostgreSQL、MySQL 等）"""
 
@@ -71,7 +80,15 @@ class DatabaseStorageBackend(StorageBackend):
         """保存鉴权密钥数据到数据库"""
         self._save_rows(AuthKeyModel, auth_keys, "id", "key_id")
 
-    def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel]) -> list[dict[str, Any]]:
+    def load_public_works(self) -> list[dict[str, Any]]:
+        """从数据库加载公开作品数据"""
+        return self._load_rows(PublicWorkModel)
+
+    def save_public_works(self, items: list[dict[str, Any]]) -> None:
+        """保存公开作品数据到数据库"""
+        self._save_rows(PublicWorkModel, items, "id", "work_id")
+
+    def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel] | type[PublicWorkModel]) -> list[dict[str, Any]]:
         session = self.Session()
         try:
             items = []
@@ -88,7 +105,7 @@ class DatabaseStorageBackend(StorageBackend):
 
     def _save_rows(
         self,
-        model: type[AccountModel] | type[AuthKeyModel],
+        model: type[AccountModel] | type[AuthKeyModel] | type[PublicWorkModel],
         items: list[dict[str, Any]],
         source_key: str,
         target_key: str | None = None,

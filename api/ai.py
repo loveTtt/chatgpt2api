@@ -15,6 +15,7 @@ from api.support import (
 from services.account_service import account_service
 from services.auth_service import auth_service
 from services.chatgpt_service import ChatGPTService, ImageGenerationError
+from services.public_work_service import public_work_service
 from utils.helper import is_image_chat_request, sse_json_stream
 
 
@@ -26,6 +27,7 @@ class ImageGenerationRequest(BaseModel):
     response_format: str = "b64_json"
     history_disabled: bool = True
     stream: bool | None = None
+    is_public: bool = False
 
 
 class ChatCompletionRequest(BaseModel):
@@ -83,7 +85,8 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             authorization: str | None = Header(default=None),
     ):
         identity = require_image_access(authorization)
-        _ensure_image_link_quota(identity, body.n)
+        if not body.is_public:
+            _ensure_image_link_quota(identity, body.n)
         base_url = resolve_image_base_url(request)
         if body.stream:
             if is_image_link_identity(identity):
@@ -104,7 +107,17 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             result = await run_in_threadpool(
                 chatgpt_service.generate_with_pool, body.prompt, body.model, body.n, body.size, body.response_format, base_url
             )
-            _consume_image_link_quota(identity, body.n, result)
+            if body.is_public:
+                await run_in_threadpool(
+                    public_work_service.publish,
+                    result=result,
+                    prompt=body.prompt,
+                    source="generation",
+                    identity=identity,
+                    base_url=base_url,
+                )
+            else:
+                _consume_image_link_quota(identity, body.n, result)
             return result
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)
@@ -121,11 +134,13 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             size: str | None = Form(default=None),
             response_format: str = Form(default="b64_json"),
             stream: bool | None = Form(default=None),
+            is_public: bool = Form(default=False),
     ):
         identity = require_image_access(authorization)
         if n < 1 or n > 4:
             raise HTTPException(status_code=400, detail={"error": "n must be between 1 and 4"})
-        _ensure_image_link_quota(identity, n)
+        if not is_public:
+            _ensure_image_link_quota(identity, n)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
@@ -149,7 +164,17 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             result = await run_in_threadpool(
                 chatgpt_service.edit_with_pool, prompt, images, model, n, size, response_format, base_url
             )
-            _consume_image_link_quota(identity, n, result)
+            if is_public:
+                await run_in_threadpool(
+                    public_work_service.publish,
+                    result=result,
+                    prompt=prompt,
+                    source="edit",
+                    identity=identity,
+                    base_url=base_url,
+                )
+            else:
+                _consume_image_link_quota(identity, n, result)
             return result
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)

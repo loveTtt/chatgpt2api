@@ -11,11 +11,15 @@ import { cn } from "@/lib/utils";
 
 const adminNavItems = [
   { href: "/image", label: "画图" },
+  { href: "/works", label: "作品" },
   { href: "/accounts", label: "号池管理" },
   { href: "/settings", label: "设置" },
 ];
 
-const userNavItems = [{ href: "/image", label: "画图" }];
+const userNavItems = [
+  { href: "/image", label: "画图" },
+  { href: "/works", label: "作品" },
+];
 
 export function TopNav() {
   const pathname = usePathname();

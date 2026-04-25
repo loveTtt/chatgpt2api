@@ -14,6 +14,7 @@ type ImageComposerProps = {
   prompt: string;
   imageCount: string;
   imageSize: string;
+  isPublic: boolean;
   availableQuota: string;
   activeTaskCount: number;
   referenceImages: Array<{ name: string; dataUrl: string }>;
@@ -23,6 +24,7 @@ type ImageComposerProps = {
   onPromptChange: (value: string) => void;
   onImageCountChange: (value: string) => void;
   onImageSizeChange: (value: string) => void;
+  onPublicChange: (value: boolean) => void;
   onSubmit: () => void | Promise<void>;
   onPickReferenceImage: () => void;
   onReferenceImageChange: (files: File[]) => void | Promise<void>;
@@ -34,6 +36,7 @@ export function ImageComposer({
   prompt,
   imageCount,
   imageSize,
+  isPublic,
   availableQuota,
   activeTaskCount,
   referenceImages,
@@ -43,6 +46,7 @@ export function ImageComposer({
   onPromptChange,
   onImageCountChange,
   onImageSizeChange,
+  onPublicChange,
   onSubmit,
   onPickReferenceImage,
   onReferenceImageChange,
@@ -248,6 +252,20 @@ export function ImageComposer({
                     ) : null}
                   </div>
 
+                  <label className="flex cursor-pointer items-center gap-2 rounded-full border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-700 transition hover:border-stone-300 sm:px-3 sm:py-2 sm:text-xs">
+                    <input
+                      type="checkbox"
+                      checked={isPublic}
+                      onChange={(event) => onPublicChange(event.target.checked)}
+                      className="size-3.5 rounded border-stone-300 text-stone-950 focus:ring-stone-400"
+                    />
+                    <span>公开到作品页</span>
+                  </label>
+                  {isPublic ? (
+                    <div className="rounded-full bg-stone-950 px-2 py-1 text-[10px] font-medium text-white sm:px-3 sm:py-2 sm:text-xs">
+                      链接额度不减少
+                    </div>
+                  ) : null}
                   <div className="flex items-center gap-1.5 sm:gap-2">
                     <ModeButton active={mode === "generate"} onClick={() => onModeChange("generate")}>
                       文生图
