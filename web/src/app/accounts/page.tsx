@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps } from "react";
 import {
   Ban,
@@ -845,7 +845,7 @@ function AccountsPageContent() {
   );
 }
 
-export default function AccountsPage() {
+function AccountsPageGuarded() {
   const { isCheckingAuth, session } = useAuthGuard(["admin"]);
 
   if (isCheckingAuth || !session || session.role !== "admin") {
@@ -857,4 +857,18 @@ export default function AccountsPage() {
   }
 
   return <AccountsPageContent />;
+}
+
+export default function AccountsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <LoaderCircle className="size-5 animate-spin text-stone-400" />
+        </div>
+      }
+    >
+      <AccountsPageGuarded />
+    </Suspense>
+  );
 }

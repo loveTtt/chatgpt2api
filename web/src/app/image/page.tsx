@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { History, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -914,7 +914,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   );
 }
 
-export default function ImagePage() {
+function ImagePageGuarded() {
   const { isCheckingAuth, session } = useAuthGuard();
 
   if (isCheckingAuth || !session) {
@@ -926,4 +926,18 @@ export default function ImagePage() {
   }
 
   return <ImagePageContent session={session} />;
+}
+
+export default function ImagePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <LoaderCircle className="size-5 animate-spin text-stone-400" />
+        </div>
+      }
+    >
+      <ImagePageGuarded />
+    </Suspense>
+  );
 }

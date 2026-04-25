@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { useAuthGuard } from "@/lib/use-auth-guard";
@@ -65,7 +65,7 @@ function SettingsPageContent() {
   );
 }
 
-export default function SettingsPage() {
+function SettingsPageGuarded() {
   const { isCheckingAuth, session } = useAuthGuard(["admin"]);
 
   if (isCheckingAuth || !session || session.role !== "admin") {
@@ -77,4 +77,18 @@ export default function SettingsPage() {
   }
 
   return <SettingsPageContent />;
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[40vh] items-center justify-center">
+          <LoaderCircle className="size-5 animate-spin text-stone-400" />
+        </div>
+      }
+    >
+      <SettingsPageGuarded />
+    </Suspense>
+  );
 }
