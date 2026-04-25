@@ -89,6 +89,7 @@ export type ImageLink = {
   quota_used: number;
   quota_remaining: number;
   expires_at: string | null;
+  key?: string | null;
   created_by?: string | null;
   created_at: string | null;
   last_used_at: string | null;
@@ -228,8 +229,8 @@ export async function fetchImageLinks() {
   return httpRequest<{ items: ImageLink[] }>("/api/auth/image-links");
 }
 
-export async function createImageLink(payload: { name?: string; quota_limit: number; expires_at?: string | null }) {
-  return httpRequest<{ item: ImageLink; key: string; items: ImageLink[] }>("/api/auth/image-links", {
+export async function createImageLink(payload: { name?: string; quota_limit: number; expires_at?: string | null; count?: number }) {
+  return httpRequest<{ item: ImageLink; items: ImageLink[]; created: ImageLink[] }>("/api/auth/image-links", {
     method: "POST",
     body: payload,
   });

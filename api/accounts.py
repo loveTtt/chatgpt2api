@@ -37,6 +37,7 @@ class ImageLinkCreateRequest(BaseModel):
     name: str = ""
     quota_limit: int = Field(default=1, ge=1)
     expires_at: str | None = None
+    count: int = Field(default=1, ge=1, le=100)
 
 
 class ImageLinkUpdateRequest(BaseModel):
@@ -155,15 +156,21 @@ def create_router() -> APIRouter:
     async def create_image_link(body: ImageLinkCreateRequest, authorization: str | None = Header(default=None)):
         admin = require_admin(authorization)
         try:
-            item, raw_key = auth_service.create_image_link(
-                name=body.name,
-                quota_limit=body.quota_limit,
-                expires_at=body.expires_at,
-                created_by=str(admin.get("id") or ""),
-            )
+            created_items = []
+            for index in range(body.count):
+                item_name = body.name
+                if body.count > 1 and item_name.strip():
+                    item_name = f"{item_name.strip()} {index + 1}"
+                item, _ = auth_service.create_image_link(
+                    name=item_name,
+                    quota_limit=body.quota_limit,
+                    expires_at=body.expires_at,
+                    created_by=str(admin.get("id") or ""),
+                )
+                created_items.append(item)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-        return {"item": item, "key": raw_key, "items": auth_service.list_keys(role="user", scope="image_link")}
+        return {"item": created_items[-1], "items": auth_service.list_keys(role="user", scope="image_link"), "created": created_items}
 
     @router.post("/api/auth/image-links/{key_id}")
     async def update_image_link(

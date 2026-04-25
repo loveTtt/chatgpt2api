@@ -94,6 +94,9 @@ class AuthService:
                     "created_by": self._clean(raw.get("created_by")) or None,
                 }
             )
+            raw_key = self._clean(raw.get("key"))
+            if raw_key:
+                item["key"] = raw_key
         return item
 
     def _load(self) -> list[dict[str, object]]:
@@ -129,6 +132,7 @@ class AuthService:
                     "quota_remaining": max(0, quota_limit - quota_used),
                     "expires_at": item.get("expires_at"),
                     "created_by": item.get("created_by"),
+                    "key": item.get("key"),
                 }
             )
         return result
@@ -178,6 +182,7 @@ class AuthService:
             "role": "user",
             "scope": "image_link",
             "key_hash": _hash_key(raw_key),
+            "key": raw_key,
             "enabled": True,
             "quota_limit": normalized_quota,
             "quota_used": 0,
