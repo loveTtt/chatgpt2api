@@ -63,6 +63,11 @@ export type LoginResponse = {
   role: AuthRole;
   subject_id: string;
   name: string;
+  scope?: string;
+  quota_limit?: number;
+  quota_used?: number;
+  quota_remaining?: number;
+  expires_at?: string | null;
 };
 
 export type UserKey = {
@@ -70,6 +75,21 @@ export type UserKey = {
   name: string;
   role: "user";
   enabled: boolean;
+  created_at: string | null;
+  last_used_at: string | null;
+};
+
+export type ImageLink = {
+  id: string;
+  name: string;
+  role: "user";
+  scope: "image_link";
+  enabled: boolean;
+  quota_limit: number;
+  quota_used: number;
+  quota_remaining: number;
+  expires_at: string | null;
+  created_by?: string | null;
   created_at: string | null;
   last_used_at: string | null;
 };
@@ -200,6 +220,33 @@ export async function updateUserKey(keyId: string, updates: { enabled?: boolean;
 
 export async function deleteUserKey(keyId: string) {
   return httpRequest<{ items: UserKey[] }>(`/api/auth/users/${keyId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchImageLinks() {
+  return httpRequest<{ items: ImageLink[] }>("/api/auth/image-links");
+}
+
+export async function createImageLink(payload: { name?: string; quota_limit: number; expires_at?: string | null }) {
+  return httpRequest<{ item: ImageLink; key: string; items: ImageLink[] }>("/api/auth/image-links", {
+    method: "POST",
+    body: payload,
+  });
+}
+
+export async function updateImageLink(
+  keyId: string,
+  updates: { enabled?: boolean; name?: string; quota_limit?: number; expires_at?: string | null },
+) {
+  return httpRequest<{ item: ImageLink; items: ImageLink[] }>(`/api/auth/image-links/${keyId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function deleteImageLink(keyId: string) {
+  return httpRequest<{ items: ImageLink[] }>(`/api/auth/image-links/${keyId}`, {
     method: "DELETE",
   });
 }

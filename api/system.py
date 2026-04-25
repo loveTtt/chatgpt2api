@@ -23,13 +23,17 @@ def create_router(app_version: str) -> APIRouter:
     @router.post("/auth/login")
     async def login(authorization: str | None = Header(default=None)):
         identity = require_identity(authorization)
-        return {
+        response = {
             "ok": True,
             "version": app_version,
             "role": identity.get("role"),
             "subject_id": identity.get("id"),
             "name": identity.get("name"),
         }
+        for key in ("scope", "quota_limit", "quota_used", "quota_remaining", "expires_at"):
+            if key in identity:
+                response[key] = identity.get(key)
+        return response
 
     @router.get("/version")
     async def get_version():

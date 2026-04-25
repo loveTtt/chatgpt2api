@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock3, LoaderCircle, Sparkles } from "lucide-react";
+import { Clock3, Edit3, LoaderCircle, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ type ImageResultsProps = {
   selectedConversation: ImageConversation | null;
   onOpenLightbox: (images: ImageLightboxItem[], index: number) => void;
   onContinueEdit: (conversationId: string, image: StoredImage | StoredReferenceImage) => void;
+  onEditPrompt: (conversationId: string, prompt: string) => void;
   formatConversationTime: (value: string) => string;
 };
 
@@ -22,6 +23,7 @@ export function ImageResults({
   selectedConversation,
   onOpenLightbox,
   onContinueEdit,
+  onEditPrompt,
   formatConversationTime,
 }: ImageResultsProps) {
   if (!selectedConversation) {
@@ -74,7 +76,18 @@ export function ImageResults({
                   <span>{getTurnStatusLabel(turn.status)}</span>
                   <span>{formatConversationTime(turn.createdAt)}</span>
                 </div>
-                <div className="text-right">{turn.prompt}</div>
+                <div className="flex flex-col items-end gap-2">
+                  <div className="text-right">{turn.prompt}</div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 rounded-full px-3 text-xs text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+                    onClick={() => onEditPrompt(selectedConversation.id, turn.prompt)}
+                  >
+                    <Edit3 className="size-3.5" />
+                    编辑提示词
+                  </Button>
+                </div>
               </div>
             </div>
 

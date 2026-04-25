@@ -15,8 +15,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { editImage, fetchAccounts, generateImage, type Account } from "@/lib/api";
+import { editImage, fetchAccounts, generateImage, login, type Account } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
+import { setStoredAuthSession, type StoredAuthSession } from "@/store/auth";
 import {
   clearImageConversations,
   deleteImageConversation,
@@ -171,7 +172,9 @@ async function recoverConversationHistory(items: ImageConversation[]) {
   return normalized;
 }
 
-function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
+function ImagePageContent({ session }: { session: StoredAuthSession }) {
+  const isAdmin = session.role === "admin";
+  const isImageLink = session.scope === "image_link";
   const didLoadQuotaRef = useRef(false);
   const conversationsRef = useRef<ImageConversation[]>([]);
   const resultsViewportRef = useRef<HTMLDivElement>(null);
@@ -251,6 +254,28 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
   }, []);
 
   const loadQuota = useCallback(async () => {
+    if (isImageLink) {
+      try {
+        const auth = await login(session.key);
+        const nextSession: StoredAuthSession = {
+          ...session,
+          role: auth.role,
+          subjectId: auth.subject_id,
+          name: auth.name,
+          scope: auth.scope,
+          quotaLimit: auth.quota_limit,
+          quotaUsed: auth.quota_used,
+          quotaRemaining: auth.quota_remaining,
+          expiresAt: auth.expires_at ?? null,
+        };
+        await setStoredAuthSession(nextSession);
+        setAvailableQuota(String(auth.quota_remaining ?? 0));
+      } catch {
+        setAvailableQuota("--");
+      }
+      return;
+    }
+
     if (!isAdmin) {
       setAvailableQuota("--");
       return;
@@ -261,7 +286,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     } catch {
       setAvailableQuota((prev) => (prev === "加载中..." ? "--" : prev));
     }
-  }, [isAdmin]);
+  }, [isAdmin, isImageLink, session]);
 
   useEffect(() => {
     if (didLoadQuotaRef.current) {
@@ -478,6 +503,13 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
     },
     [],
   );
+
+  const handleEditPrompt = useCallback((conversationId: string, prompt: string) => {
+    setSelectedConversationId(conversationId);
+    setImagePrompt(prompt);
+    textareaRef.current?.focus();
+    toast.success("已载入历史提示词，修改后将作为新消息发送");
+  }, []);
 
   const openLightbox = useCallback((images: ImageLightboxItem[], index: number) => {
     if (images.length === 0) {
@@ -844,6 +876,7 @@ function ImagePageContent({ isAdmin }: { isAdmin: boolean }) {
               selectedConversation={selectedConversation}
               onOpenLightbox={openLightbox}
               onContinueEdit={handleContinueEdit}
+              onEditPrompt={handleEditPrompt}
               formatConversationTime={formatConversationTime}
             />
           </div>
@@ -892,5 +925,5 @@ export default function ImagePage() {
     );
   }
 
-  return <ImagePageContent isAdmin={session.role === "admin"} />;
+  return <ImagePageContent session={session} />;
 }

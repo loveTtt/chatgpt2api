@@ -9,6 +9,11 @@ export type StoredAuthSession = {
   role: AuthRole;
   subjectId: string;
   name: string;
+  scope?: string;
+  quotaLimit?: number;
+  quotaUsed?: number;
+  quotaRemaining?: number;
+  expiresAt?: string | null;
 };
 
 export const AUTH_KEY_STORAGE_KEY = "chatgpt2api_auth_key";
@@ -36,6 +41,11 @@ function normalizeSession(value: unknown, fallbackKey = ""): StoredAuthSession |
     role,
     subjectId: String(candidate.subjectId || "").trim(),
     name: String(candidate.name || "").trim(),
+    scope: String(candidate.scope || "").trim() || undefined,
+    quotaLimit: typeof candidate.quotaLimit === "number" ? candidate.quotaLimit : undefined,
+    quotaUsed: typeof candidate.quotaUsed === "number" ? candidate.quotaUsed : undefined,
+    quotaRemaining: typeof candidate.quotaRemaining === "number" ? candidate.quotaRemaining : undefined,
+    expiresAt: typeof candidate.expiresAt === "string" ? candidate.expiresAt : null,
   };
 }
 

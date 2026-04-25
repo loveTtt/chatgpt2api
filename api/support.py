@@ -27,6 +27,10 @@ def _legacy_admin_identity(token: str) -> dict[str, object] | None:
     return None
 
 
+def is_image_link_identity(identity: dict[str, object]) -> bool:
+    return identity.get("scope") == "image_link"
+
+
 def require_identity(authorization: str | None) -> dict[str, object]:
     token = extract_bearer_token(authorization)
     identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
@@ -44,6 +48,13 @@ def require_admin(authorization: str | None) -> dict[str, object]:
     if identity.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"error": "admin permission required"})
     return identity
+
+
+def require_image_access(authorization: str | None) -> dict[str, object]:
+    identity = require_identity(authorization)
+    if identity.get("role") in {"admin", "user"}:
+        return identity
+    raise HTTPException(status_code=403, detail={"error": "image permission required"})
 
 
 def resolve_image_base_url(request: Request) -> str:

@@ -33,6 +33,19 @@ class UserKeyUpdateRequest(BaseModel):
     enabled: bool | None = None
 
 
+class ImageLinkCreateRequest(BaseModel):
+    name: str = ""
+    quota_limit: int = Field(default=1, ge=1)
+    expires_at: str | None = None
+
+
+class ImageLinkUpdateRequest(BaseModel):
+    name: str | None = None
+    enabled: bool | None = None
+    quota_limit: int | None = Field(default=None, ge=1)
+    expires_at: str | None = None
+
+
 class AccountCreateRequest(BaseModel):
     tokens: list[str] = Field(default_factory=list)
 
@@ -96,13 +109,13 @@ def create_router() -> APIRouter:
     @router.get("/api/auth/users")
     async def list_user_keys(authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        return {"items": auth_service.list_keys(role="user")}
+        return {"items": auth_service.list_keys(role="user", scope="")}
 
     @router.post("/api/auth/users")
     async def create_user_key(body: UserKeyCreateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
         item, raw_key = auth_service.create_key(role="user", name=body.name)
-        return {"item": item, "key": raw_key, "items": auth_service.list_keys(role="user")}
+        return {"item": item, "key": raw_key, "items": auth_service.list_keys(role="user", scope="")}
 
     @router.post("/api/auth/users/{key_id}")
     async def update_user_key(
@@ -121,17 +134,70 @@ def create_router() -> APIRouter:
         }
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "no updates provided"})
-        item = auth_service.update_key(key_id, updates, role="user")
+        item = auth_service.update_key(key_id, updates, role="user", scope="")
         if item is None:
             raise HTTPException(status_code=404, detail={"error": "user key not found"})
-        return {"item": item, "items": auth_service.list_keys(role="user")}
+        return {"item": item, "items": auth_service.list_keys(role="user", scope="")}
 
     @router.delete("/api/auth/users/{key_id}")
     async def delete_user_key(key_id: str, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        if not auth_service.delete_key(key_id, role="user"):
+        if not auth_service.delete_key(key_id, role="user", scope=""):
             raise HTTPException(status_code=404, detail={"error": "user key not found"})
-        return {"items": auth_service.list_keys(role="user")}
+        return {"items": auth_service.list_keys(role="user", scope="")}
+
+    @router.get("/api/auth/image-links")
+    async def list_image_links(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return {"items": auth_service.list_keys(role="user", scope="image_link")}
+
+    @router.post("/api/auth/image-links")
+    async def create_image_link(body: ImageLinkCreateRequest, authorization: str | None = Header(default=None)):
+        admin = require_admin(authorization)
+        try:
+            item, raw_key = auth_service.create_image_link(
+                name=body.name,
+                quota_limit=body.quota_limit,
+                expires_at=body.expires_at,
+                created_by=str(admin.get("id") or ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {"item": item, "key": raw_key, "items": auth_service.list_keys(role="user", scope="image_link")}
+
+    @router.post("/api/auth/image-links/{key_id}")
+    async def update_image_link(
+            key_id: str,
+            body: ImageLinkUpdateRequest,
+            authorization: str | None = Header(default=None),
+    ):
+        require_admin(authorization)
+        updates = {
+            key: value
+            for key, value in {
+                "name": body.name,
+                "enabled": body.enabled,
+                "quota_limit": body.quota_limit,
+                "expires_at": body.expires_at,
+            }.items()
+            if value is not None
+        }
+        if not updates:
+            raise HTTPException(status_code=400, detail={"error": "no updates provided"})
+        try:
+            item = auth_service.update_key(key_id, updates, role="user", scope="image_link")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        if item is None:
+            raise HTTPException(status_code=404, detail={"error": "image link not found"})
+        return {"item": item, "items": auth_service.list_keys(role="user", scope="image_link")}
+
+    @router.delete("/api/auth/image-links/{key_id}")
+    async def delete_image_link(key_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        if not auth_service.delete_key(key_id, role="user", scope="image_link"):
+            raise HTTPException(status_code=404, detail={"error": "image link not found"})
+        return {"items": auth_service.list_keys(role="user", scope="image_link")}
 
     @router.get("/api/accounts")
     async def get_accounts(authorization: str | None = Header(default=None)):

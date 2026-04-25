@@ -5,8 +5,15 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.support import raise_image_quota_error, require_identity, resolve_image_base_url
+from api.support import (
+    is_image_link_identity,
+    raise_image_quota_error,
+    require_image_access,
+    require_identity,
+    resolve_image_base_url,
+)
 from services.account_service import account_service
+from services.auth_service import auth_service
 from services.chatgpt_service import ChatGPTService, ImageGenerationError
 from utils.helper import is_image_chat_request, sse_json_stream
 
@@ -40,12 +47,30 @@ class ResponseCreateRequest(BaseModel):
     stream: bool | None = None
 
 
+def _ensure_image_link_quota(identity: dict[str, object], count: int) -> None:
+    try:
+        auth_service.ensure_image_link_quota(identity, count)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"error": str(exc)}) from exc
+
+
+def _consume_image_link_quota(identity: dict[str, object], count: int, result: object) -> None:
+    if not is_image_link_identity(identity) or not isinstance(result, dict):
+        return
+    data = result.get("data")
+    success_count = len(data) if isinstance(data, list) else count
+    if success_count > 0:
+        auth_service.consume_image_link_quota(identity, success_count)
+
+
 def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
     router = APIRouter()
 
     @router.get("/v1/models")
     async def list_models(authorization: str | None = Header(default=None)):
-        require_identity(authorization)
+        require_image_access(authorization)
         try:
             return await run_in_threadpool(chatgpt_service.list_models)
         except Exception as exc:
@@ -57,9 +82,12 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             request: Request,
             authorization: str | None = Header(default=None),
     ):
-        require_identity(authorization)
+        identity = require_image_access(authorization)
+        _ensure_image_link_quota(identity, body.n)
         base_url = resolve_image_base_url(request)
         if body.stream:
+            if is_image_link_identity(identity):
+                raise HTTPException(status_code=400, detail={"error": "image link cannot use streaming image generation"})
             try:
                 await run_in_threadpool(account_service.get_available_access_token)
             except RuntimeError as exc:
@@ -73,9 +101,11 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 media_type="text/event-stream",
             )
         try:
-            return await run_in_threadpool(
+            result = await run_in_threadpool(
                 chatgpt_service.generate_with_pool, body.prompt, body.model, body.n, body.size, body.response_format, base_url
             )
+            _consume_image_link_quota(identity, body.n, result)
+            return result
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)
 
@@ -92,9 +122,10 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             response_format: str = Form(default="b64_json"),
             stream: bool | None = Form(default=None),
     ):
-        require_identity(authorization)
+        identity = require_image_access(authorization)
         if n < 1 or n > 4:
             raise HTTPException(status_code=400, detail={"error": "n must be between 1 and 4"})
+        _ensure_image_link_quota(identity, n)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
@@ -106,6 +137,8 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 raise HTTPException(status_code=400, detail={"error": "image file is empty"})
             images.append((image_data, upload.filename or "image.png", upload.content_type or "image/png"))
         if stream:
+            if is_image_link_identity(identity):
+                raise HTTPException(status_code=400, detail={"error": "image link cannot use streaming image edits"})
             if not account_service.has_available_account():
                 raise_image_quota_error(RuntimeError("no available image quota"))
             return StreamingResponse(
@@ -113,15 +146,19 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 media_type="text/event-stream",
             )
         try:
-            return await run_in_threadpool(
+            result = await run_in_threadpool(
                 chatgpt_service.edit_with_pool, prompt, images, model, n, size, response_format, base_url
             )
+            _consume_image_link_quota(identity, n, result)
+            return result
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)
 
     @router.post("/v1/chat/completions")
     async def create_chat_completion(body: ChatCompletionRequest, authorization: str | None = Header(default=None)):
-        require_identity(authorization)
+        identity = require_identity(authorization)
+        if is_image_link_identity(identity):
+            raise HTTPException(status_code=403, detail={"error": "image link cannot access chat completions"})
         payload = body.model_dump(mode="python")
         if bool(payload.get("stream")):
             if is_image_chat_request(payload):
@@ -137,7 +174,9 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
 
     @router.post("/v1/responses")
     async def create_response(body: ResponseCreateRequest, authorization: str | None = Header(default=None)):
-        require_identity(authorization)
+        identity = require_identity(authorization)
+        if is_image_link_identity(identity):
+            raise HTTPException(status_code=403, detail={"error": "image link cannot access responses"})
         payload = body.model_dump(mode="python")
         if bool(payload.get("stream")):
             return StreamingResponse(
