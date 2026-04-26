@@ -6,7 +6,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Callable
 
 from fastapi import HTTPException
 
@@ -1053,10 +1053,37 @@ class ChatGPTService:
         except Exception as exc:
             raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
 
-    def create_chat_completion(self, body: dict[str, object]) -> dict[str, object]:
-        if is_image_chat_request(body):
-            return self._create_image_chat_completion(body)
-        return self._create_text_chat_completion(body)
+
+    def generate_public_work_title(self, prompt: str, revised_prompt: str = "") -> str:
+        prompt_text = str(prompt or "").strip()
+        revised_text = str(revised_prompt or "").strip()
+        if not prompt_text and not revised_text:
+            return "未命名作品"
+
+        user_content = prompt_text
+        if revised_text and revised_text != prompt_text:
+            user_content = f"原始提示词：{prompt_text}\n优化后提示词：{revised_text}"
+
+        body = {
+            "model": "gpt-5-3-mini",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是图片作品命名助手。请根据用户提示词生成一个简短中文标题。"
+                        "要求：8到16个字优先；不要引号；不要句号；不要解释；不要编号；"
+                        "不要使用‘图片’‘作品’这类空泛词；只返回标题正文。"
+                    ),
+                },
+                {"role": "user", "content": user_content},
+            ],
+        }
+        result = self.create_chat_completion(body)
+        choices = result.get("choices") if isinstance(result, dict) else None
+        first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
+        title = str(message.get("content") or "").strip().strip('"').strip("'").strip()
+        return title or "未命名作品"
 
     def stream_chat_completion(self, body: dict[str, object]) -> Iterator[dict[str, object]]:
         if is_image_chat_request(body):

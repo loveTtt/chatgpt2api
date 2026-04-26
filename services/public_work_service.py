@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 import time
 import uuid
-from typing import Any, Literal
+from typing import Any, Literal, Callable
 
 from PIL import Image
 
@@ -28,16 +28,31 @@ def _clean(value: object) -> str:
 class PublicWorkService:
     def __init__(self, storage: StorageBackend):
         self.storage = storage
+        self._title_generator: Callable[[str, str], str] | None = None
+
+    def set_title_generator(self, generator: Callable[[str, str], str]) -> None:
+        self._title_generator = generator
+
+    def _generate_title(self, prompt: str, revised_prompt: str) -> str:
+        if not self._title_generator:
+            return "未命名作品"
+        try:
+            title = _clean(self._title_generator(prompt, revised_prompt))
+        except Exception:
+            return "未命名作品"
+        return title or "未命名作品"
 
     @staticmethod
     def _public_item(item: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": item.get("id"),
+            "title": item.get("title") or "",
             "prompt": item.get("prompt") or "",
             "revised_prompt": item.get("revised_prompt") or "",
             "image_url": item.get("image_url") or "",
             "width": int(item.get("width") or 0),
             "height": int(item.get("height") or 0),
+            "file_size_bytes": int(item.get("file_size_bytes") or 0),
             "created_at": item.get("created_at") or "",
         }
 
@@ -113,14 +128,17 @@ class PublicWorkService:
             if not image_data:
                 continue
             width, height = self._image_size(image_data)
+            revised_prompt = _clean(item.get("revised_prompt"))
             created_items.append(
                 {
                     "id": uuid.uuid4().hex,
+                    "title": self._generate_title(prompt, revised_prompt),
                     "prompt": prompt,
-                    "revised_prompt": _clean(item.get("revised_prompt")),
+                    "revised_prompt": revised_prompt,
                     "image_url": self._save_image(image_data, base_url),
                     "width": width,
                     "height": height,
+                    "file_size_bytes": len(image_data),
                     "created_at": created_at,
                     "source": source,
                     "identity_id": _clean(identity.get("id")) or None,

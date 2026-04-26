@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from collections import defaultdict, deque
-import time
-from threading import Lock
-
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.support import (
-    extract_bearer_token,
     is_image_link_identity,
     raise_image_quota_error,
     require_image_access,
@@ -22,13 +17,6 @@ from services.auth_service import auth_service
 from services.chatgpt_service import ChatGPTService, ImageGenerationError
 from services.public_work_service import public_work_service
 from utils.helper import is_image_chat_request, sse_json_stream
-
-
-_OPTIMIZE_PROMPT_MODEL = "gpt-5-3-mini"
-_OPTIMIZE_PROMPT_LIMIT = 10
-_OPTIMIZE_PROMPT_WINDOW_SECONDS = 60
-_optimize_prompt_rate_limit: dict[str, deque[float]] = defaultdict(deque)
-_optimize_prompt_rate_limit_lock = Lock()
 
 
 class ImageGenerationRequest(BaseModel):
@@ -61,10 +49,6 @@ class ResponseCreateRequest(BaseModel):
     stream: bool | None = None
 
 
-class PromptOptimizeRequest(BaseModel):
-    prompt: str = Field(..., min_length=1)
-
-
 def _ensure_image_link_quota(identity: dict[str, object], count: int) -> None:
     try:
         auth_service.ensure_image_link_quota(identity, count)
@@ -83,42 +67,8 @@ def _consume_image_link_quota(identity: dict[str, object], count: int, result: o
         auth_service.consume_image_link_quota(identity, success_count)
 
 
-def _optimize_prompt_rate_limit_key(identity: dict[str, object], authorization: str | None) -> str:
-    identity_id = str(identity.get("id") or "").strip()
-    if identity_id and identity_id != "admin":
-        return identity_id
-    token = extract_bearer_token(authorization)
-    return token or identity_id or "anonymous"
-
-
-def _check_optimize_prompt_rate_limit(identity: dict[str, object], authorization: str | None) -> None:
-    key = _optimize_prompt_rate_limit_key(identity, authorization)
-    now = time.monotonic()
-    window_start = now - _OPTIMIZE_PROMPT_WINDOW_SECONDS
-    with _optimize_prompt_rate_limit_lock:
-        bucket = _optimize_prompt_rate_limit[key]
-        while bucket and bucket[0] <= window_start:
-            bucket.popleft()
-        if len(bucket) >= _OPTIMIZE_PROMPT_LIMIT:
-            raise HTTPException(status_code=429, detail={"error": "optimize prompt rate limit exceeded"})
-        bucket.append(now)
-
-
-def _build_optimize_prompt_messages(prompt: str) -> list[dict[str, str]]:
-    return [
-        {
-            "role": "system",
-            "content": (
-                "你是图像生成提示词优化助手。你的任务是把用户原始提示词优化为更适合 AI 画图模型理解的中文提示词。"
-                "保持用户原意，不要擅自改题；补充必要的主体、构图、镜头、光线、材质、风格、氛围等描述；"
-                "不要输出解释、标题、编号、Markdown，只返回优化后的最终提示词正文。"
-            ),
-        },
-        {"role": "user", "content": prompt},
-    ]
-
-
 def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
+    public_work_service.set_title_generator(chatgpt_service.generate_public_work_title)
     router = APIRouter()
 
     @router.get("/v1/models")
@@ -128,30 +78,6 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             return await run_in_threadpool(chatgpt_service.list_models)
         except Exception as exc:
             raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
-
-    @router.post("/api/image/prompts/optimize")
-    async def optimize_prompt(body: PromptOptimizeRequest, authorization: str | None = Header(default=None)):
-        identity = require_identity(authorization)
-        if is_image_link_identity(identity):
-            _ensure_image_link_quota(identity, 1)
-        _check_optimize_prompt_rate_limit(identity, authorization)
-        prompt = body.prompt.strip()
-        payload = {
-            "model": _OPTIMIZE_PROMPT_MODEL,
-            "messages": _build_optimize_prompt_messages(prompt),
-        }
-        result = await run_in_threadpool(chatgpt_service.create_chat_completion, payload)
-        choices = result.get("choices") if isinstance(result, dict) else None
-        first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
-        message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
-        optimized_prompt = str(message.get("content") or "").strip()
-        if not optimized_prompt:
-            raise HTTPException(status_code=502, detail={"error": "optimized prompt is empty"})
-        return {
-            "original_prompt": prompt,
-            "optimized_prompt": optimized_prompt,
-            "model": _OPTIMIZE_PROMPT_MODEL,
-        }
 
     @router.post("/v1/images/generations")
     async def generate_images(
