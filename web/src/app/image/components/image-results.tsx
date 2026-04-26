@@ -161,7 +161,10 @@ export function ImageResults({
                             />
                           </button>
                           <div className="flex items-center justify-between gap-2 px-3 py-3">
-                            <div className="text-xs text-stone-500">结果 {index + 1}</div>
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-stone-800">{image.title || `结果 ${index + 1}`}</div>
+                              <div className="text-xs text-stone-500">结果 {index + 1}</div>
+                            </div>
                             <Button
                               variant="outline"
                               size="sm"

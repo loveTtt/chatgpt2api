@@ -16,6 +16,7 @@ export type StoredImage = {
   id: string;
   status?: "loading" | "success" | "error";
   b64_json?: string;
+  title?: string;
   error?: string;
 };
 
@@ -63,6 +64,7 @@ function normalizeStoredImage(image: StoredImage): StoredImage {
   }
   return {
     ...image,
+    title: typeof image.title === "string" ? image.title : undefined,
     status: image.b64_json ? "success" : "loading",
   };
 }

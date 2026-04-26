@@ -13,6 +13,11 @@ export type StoredAuthSession = {
   quotaLimit?: number;
   quotaUsed?: number;
   quotaRemaining?: number;
+  quotaMode?: "one_time" | "daily";
+  publicFreeLimit?: number;
+  publicFreeUsed?: number;
+  publicFreeRemaining?: number;
+  quotaResetDate?: string;
   expiresAt?: string | null;
 };
 
@@ -45,6 +50,11 @@ function normalizeSession(value: unknown, fallbackKey = ""): StoredAuthSession |
     quotaLimit: typeof candidate.quotaLimit === "number" ? candidate.quotaLimit : undefined,
     quotaUsed: typeof candidate.quotaUsed === "number" ? candidate.quotaUsed : undefined,
     quotaRemaining: typeof candidate.quotaRemaining === "number" ? candidate.quotaRemaining : undefined,
+    quotaMode: candidate.quotaMode === "daily" ? "daily" : candidate.quotaMode === "one_time" ? "one_time" : undefined,
+    publicFreeLimit: typeof candidate.publicFreeLimit === "number" ? candidate.publicFreeLimit : undefined,
+    publicFreeUsed: typeof candidate.publicFreeUsed === "number" ? candidate.publicFreeUsed : undefined,
+    publicFreeRemaining: typeof candidate.publicFreeRemaining === "number" ? candidate.publicFreeRemaining : undefined,
+    quotaResetDate: typeof candidate.quotaResetDate === "string" ? candidate.quotaResetDate : undefined,
     expiresAt: typeof candidate.expiresAt === "string" ? candidate.expiresAt : null,
   };
 }

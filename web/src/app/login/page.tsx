@@ -33,6 +33,16 @@ export default function LoginPage() {
         role: data.role,
         subjectId: data.subject_id,
         name: data.name,
+        scope: data.scope,
+        quotaLimit: data.quota_limit,
+        quotaUsed: data.quota_used,
+        quotaRemaining: data.quota_remaining,
+        quotaMode: data.quota_mode,
+        publicFreeLimit: data.public_free_limit,
+        publicFreeUsed: data.public_free_used,
+        publicFreeRemaining: data.public_free_remaining,
+        quotaResetDate: data.quota_reset_date,
+        expiresAt: data.expires_at ?? null,
       });
       router.replace(getDefaultRouteForRole(data.role));
     } catch (error) {

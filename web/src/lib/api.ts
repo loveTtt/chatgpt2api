@@ -4,6 +4,7 @@ export type AccountType = "Free" | "Plus" | "ProLite" | "Pro" | "Team";
 export type AccountStatus = "正常" | "限流" | "异常" | "禁用";
 export type ImageModel = "auto" | "gpt-image-1" | "gpt-image-2";
 export type AuthRole = "admin" | "user";
+export type ImageLinkQuotaMode = "one_time" | "daily";
 export type PublicWork = {
   id: string;
   title?: string;
@@ -18,6 +19,24 @@ export type PublicWork = {
 
 type ImageRequestOptions = {
   isPublic?: boolean;
+};
+
+type LoginResponse = {
+  ok: boolean;
+  version: string;
+  role: AuthRole;
+  subject_id: string;
+  name: string;
+  scope?: string;
+  quota_limit?: number;
+  quota_used?: number;
+  quota_remaining?: number;
+  quota_mode?: ImageLinkQuotaMode;
+  public_free_limit?: number;
+  public_free_used?: number;
+  public_free_remaining?: number;
+  quota_reset_date?: string;
+  expires_at?: string | null;
 };
 
 export type Account = {
@@ -90,11 +109,22 @@ export type ImageLink = {
   quota_limit: number;
   quota_used: number;
   quota_remaining: number;
+  quota_mode: ImageLinkQuotaMode;
+  public_free_limit: number;
+  public_free_used: number;
+  public_free_remaining: number;
+  quota_reset_date?: string | null;
   expires_at: string | null;
   key?: string | null;
   created_by?: string | null;
   created_at: string | null;
   last_used_at: string | null;
+};
+
+export type ImageResponseItem = {
+  b64_json: string;
+  revised_prompt?: string;
+  title?: string;
 };
 
 export async function login(authKey: string) {
@@ -152,7 +182,7 @@ export async function updateAccount(
 }
 
 export async function generateImage(prompt: string, model?: ImageModel, size?: string, options: ImageRequestOptions = {}) {
-  return httpRequest<{ created: number; data: Array<{ b64_json: string; revised_prompt?: string }> }>(
+  return httpRequest<{ created: number; data: ImageResponseItem[] }>(
     "/v1/images/generations",
     {
       method: "POST",
@@ -187,7 +217,7 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   }
   formData.append("n", "1");
 
-  return httpRequest<{ created: number; data: Array<{ b64_json: string; revised_prompt?: string }> }>(
+  return httpRequest<{ created: number; data: ImageResponseItem[] }>(
     "/v1/images/edits",
     {
       method: "POST",
@@ -248,7 +278,14 @@ export async function fetchImageLinks() {
   return httpRequest<{ items: ImageLink[] }>("/api/auth/image-links");
 }
 
-export async function createImageLink(payload: { name?: string; quota_limit: number; expires_at?: string | null; count?: number }) {
+export async function createImageLink(payload: {
+  name?: string;
+  quota_limit: number;
+  quota_mode?: ImageLinkQuotaMode;
+  public_free_limit?: number;
+  expires_at?: string | null;
+  count?: number;
+}) {
   return httpRequest<{ item: ImageLink; items: ImageLink[]; created: ImageLink[] }>("/api/auth/image-links", {
     method: "POST",
     body: payload,
@@ -257,7 +294,16 @@ export async function createImageLink(payload: { name?: string; quota_limit: num
 
 export async function updateImageLink(
   keyId: string,
-  updates: { enabled?: boolean; name?: string; quota_limit?: number; expires_at?: string | null },
+  updates: {
+    enabled?: boolean;
+    name?: string;
+    quota_limit?: number;
+    quota_used?: number;
+    quota_mode?: ImageLinkQuotaMode;
+    public_free_limit?: number;
+    public_free_used?: number;
+    expires_at?: string | null;
+  },
 ) {
   return httpRequest<{ item: ImageLink; items: ImageLink[] }>(`/api/auth/image-links/${keyId}`, {
     method: "POST",
@@ -270,6 +316,205 @@ export async function deleteImageLink(keyId: string) {
     method: "DELETE",
   });
 }
+
+// ── CPA (CLIProxyAPI) ──────────────────────────────────────────────
+
+export type CPAPool = {
+  id: string;
+  name: string;
+  base_url: string;
+  import_job?: CPAImportJob | null;
+};
+
+export type CPARemoteFile = {
+  name: string;
+  email: string;
+};
+
+export type CPAImportJob = {
+  job_id: string;
+  status: "pending" | "running" | "completed" | "failed";
+  created_at: string;
+  updated_at: string;
+  total: number;
+  completed: number;
+  added: number;
+  skipped: number;
+  refreshed: number;
+  failed: number;
+  errors: Array<{ name: string; error: string }>;
+};
+
+export async function fetchCPAPools() {
+  return httpRequest<{ pools: CPAPool[] }>("/api/cpa/pools");
+}
+
+export async function createCPAPool(pool: { name: string; base_url: string; secret_key: string }) {
+  return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>("/api/cpa/pools", {
+    method: "POST",
+    body: pool,
+  });
+}
+
+export async function updateCPAPool(
+  poolId: string,
+  updates: { name?: string; base_url?: string; secret_key?: string },
+) {
+  return httpRequest<{ pool: CPAPool; pools: CPAPool[] }>(`/api/cpa/pools/${poolId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function deleteCPAPool(poolId: string) {
+  return httpRequest<{ pools: CPAPool[] }>(`/api/cpa/pools/${poolId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchCPAPoolFiles(poolId: string) {
+  return httpRequest<{ pool_id: string; files: CPARemoteFile[] }>(`/api/cpa/pools/${poolId}/files`);
+}
+
+export async function startCPAImport(poolId: string, names: string[]) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/cpa/pools/${poolId}/import`, {
+    method: "POST",
+    body: { names },
+  });
+}
+
+export async function fetchCPAPoolImportJob(poolId: string) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/cpa/pools/${poolId}/import`);
+}
+
+// ── Sub2API ────────────────────────────────────────────────────────
+
+export type Sub2APIServer = {
+  id: string;
+  name: string;
+  base_url: string;
+  email: string;
+  has_api_key: boolean;
+  group_id: string;
+  import_job?: CPAImportJob | null;
+};
+
+export type Sub2APIRemoteAccount = {
+  id: string;
+  name: string;
+  email: string;
+  plan_type: string;
+  status: string;
+  expires_at: string;
+  has_refresh_token: boolean;
+};
+
+export type Sub2APIRemoteGroup = {
+  id: string;
+  name: string;
+  description: string;
+  platform: string;
+  status: string;
+  account_count: number;
+  active_account_count: number;
+};
+
+export async function fetchSub2APIServers() {
+  return httpRequest<{ servers: Sub2APIServer[] }>("/api/sub2api/servers");
+}
+
+export async function createSub2APIServer(server: {
+  name: string;
+  base_url: string;
+  email: string;
+  password: string;
+  api_key: string;
+  group_id: string;
+}) {
+  return httpRequest<{ server: Sub2APIServer; servers: Sub2APIServer[] }>("/api/sub2api/servers", {
+    method: "POST",
+    body: server,
+  });
+}
+
+export async function updateSub2APIServer(
+  serverId: string,
+  updates: {
+    name?: string;
+    base_url?: string;
+    email?: string;
+    password?: string;
+    api_key?: string;
+    group_id?: string;
+  },
+) {
+  return httpRequest<{ server: Sub2APIServer; servers: Sub2APIServer[] }>(`/api/sub2api/servers/${serverId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function fetchSub2APIServerGroups(serverId: string) {
+  return httpRequest<{ server_id: string; groups: Sub2APIRemoteGroup[] }>(
+    `/api/sub2api/servers/${serverId}/groups`,
+  );
+}
+
+export async function deleteSub2APIServer(serverId: string) {
+  return httpRequest<{ servers: Sub2APIServer[] }>(`/api/sub2api/servers/${serverId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchSub2APIServerAccounts(serverId: string) {
+  return httpRequest<{ server_id: string; accounts: Sub2APIRemoteAccount[] }>(
+    `/api/sub2api/servers/${serverId}/accounts`,
+  );
+}
+
+export async function startSub2APIImport(serverId: string, accountIds: string[]) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/sub2api/servers/${serverId}/import`, {
+    method: "POST",
+    body: { account_ids: accountIds },
+  });
+}
+
+export async function fetchSub2APIImportJob(serverId: string) {
+  return httpRequest<{ import_job: CPAImportJob | null }>(`/api/sub2api/servers/${serverId}/import`);
+}
+
+// ── Upstream proxy ────────────────────────────────────────────────
+
+export type ProxySettings = {
+  enabled: boolean;
+  url: string;
+};
+
+export type ProxyTestResult = {
+  ok: boolean;
+  status: number;
+  latency_ms: number;
+  error: string | null;
+};
+
+export async function fetchProxy() {
+  return httpRequest<{ proxy: ProxySettings }>("/api/proxy");
+}
+
+export async function updateProxy(updates: { enabled?: boolean; url?: string }) {
+  return httpRequest<{ proxy: ProxySettings }>("/api/proxy", {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function testProxy(url?: string) {
+  return httpRequest<{ result: ProxyTestResult }>("/api/proxy/test", {
+    method: "POST",
+    body: { url: url ?? "" },
+  });
+}
+
 
 // ── CPA (CLIProxyAPI) ──────────────────────────────────────────────
 

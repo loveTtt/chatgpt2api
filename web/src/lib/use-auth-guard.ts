@@ -44,6 +44,11 @@ export function useAuthGuard(allowedRoles?: AuthRole[]): UseAuthGuardResult {
             quotaLimit: auth.quota_limit,
             quotaUsed: auth.quota_used,
             quotaRemaining: auth.quota_remaining,
+            quotaMode: auth.quota_mode,
+            publicFreeLimit: auth.public_free_limit,
+            publicFreeUsed: auth.public_free_used,
+            publicFreeRemaining: auth.public_free_remaining,
+            quotaResetDate: auth.quota_reset_date,
             expiresAt: auth.expires_at ?? null,
           };
           await setStoredAuthSession(storedSession);
