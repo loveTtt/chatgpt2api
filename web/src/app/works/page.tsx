@@ -49,7 +49,6 @@ function WorksPageContent() {
   const viewWorkId = String(searchParams.get("view") || "").trim();
   const [works, setWorks] = useState<PublicWork[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isResolvingSharedWork, setIsResolvingSharedWork] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -95,24 +94,25 @@ function WorksPageContent() {
   const loadWorks = useCallback(async () => {
     setIsLoading(true);
     try {
+      if (viewWorkId) {
+        const data = await fetchPublicWorkById(viewWorkId);
+        setWorks([data.item]);
+        return;
+      }
+
       const data = await fetchPublicWorks(60);
-      setWorks((current) => {
-        if (!viewWorkId) {
-          return data.items;
-        }
-        const currentViewedWork = current.find((item) => item.id === viewWorkId);
-        if (currentViewedWork && !data.items.some((item) => item.id === viewWorkId)) {
-          return [currentViewedWork, ...data.items];
-        }
-        return data.items;
-      });
+      setWorks(data.items);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "读取作品失败";
+      const message = error instanceof Error ? error.message : viewWorkId ? "读取分享作品失败" : "读取作品失败";
       toast.error(message);
+      if (viewWorkId) {
+        setWorks([]);
+        syncViewParam();
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [viewWorkId]);
+  }, [syncViewParam, viewWorkId]);
 
   useEffect(() => {
     let active = true;
@@ -152,39 +152,10 @@ function WorksPageContent() {
       return;
     }
 
-    let active = true;
-    setIsResolvingSharedWork(true);
-
-    const loadSharedWork = async () => {
-      try {
-        const data = await fetchPublicWorkById(viewWorkId);
-        if (!active) {
-          return;
-        }
-        setWorks((current) => {
-          if (current.some((item) => item.id === data.item.id)) {
-            return current;
-          }
-          return [data.item, ...current];
-        });
-      } catch (error) {
-        if (!active) {
-          return;
-        }
-        toast.error(error instanceof Error ? error.message : "读取作品详情失败");
-        syncViewParam();
-      } finally {
-        if (active) {
-          setIsResolvingSharedWork(false);
-        }
-      }
-    };
-
-    void loadSharedWork();
-    return () => {
-      active = false;
-    };
+    setLightboxOpen(false);
+    syncViewParam();
   }, [isLoading, syncViewParam, viewWorkId, works]);
+
 
   const handleOpenWork = useCallback(
     (index: number) => {
@@ -203,7 +174,9 @@ function WorksPageContent() {
     (open: boolean) => {
       setLightboxOpen(open);
       if (!open) {
-        syncViewParam();
+        if (!viewWorkId) {
+          syncViewParam();
+        }
         return;
       }
       const targetWork = works[lightboxIndex];
@@ -211,7 +184,7 @@ function WorksPageContent() {
         syncViewParam(targetWork.id);
       }
     },
-    [lightboxIndex, syncViewParam, works],
+    [lightboxIndex, syncViewParam, viewWorkId, works],
   );
 
   const handleLightboxIndexChange = useCallback(
@@ -242,7 +215,7 @@ function WorksPageContent() {
     [lightboxIndex, syncViewParam, works],
   );
 
-  const isBusy = isLoading || (isResolvingSharedWork && works.length === 0);
+  const isBusy = isLoading;
 
   return (
     <>
@@ -281,6 +254,31 @@ function WorksPageContent() {
               <div className="mx-auto mb-5 h-px w-20 bg-stone-200" />
               <p className="text-sm text-stone-500">还没有公开作品。</p>
             </div>
+          </div>
+        ) : viewWorkId ? (
+          <div className="mx-auto max-w-4xl">
+            {works.map((work, index) => {
+              const imageUrl = buildWorkUrl(work.image_url);
+              return (
+                <article key={work.id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleOpenWork(index);
+                    }}
+                    className="relative block w-full cursor-zoom-in overflow-hidden bg-stone-100 text-left"
+                  >
+                    <img
+                      src={imageUrl}
+                      alt={work.prompt || `作品 ${index + 1}`}
+                      width={work.width || undefined}
+                      height={work.height || undefined}
+                      className="block h-auto w-full"
+                    />
+                  </button>
+                </article>
+              );
+            })}
           </div>
         ) : (
           <div className="columns-1 gap-5 space-y-5 sm:columns-2 xl:columns-3 2xl:columns-4">
