@@ -15,10 +15,12 @@ export type PublicWork = {
   height: number;
   file_size_bytes?: number;
   created_at: string;
+  is_prompt_public?: boolean;
 };
 
 type ImageRequestOptions = {
   isPublic?: boolean;
+  isPromptPublic?: boolean;
 };
 
 type LoginResponse = {
@@ -191,6 +193,7 @@ export async function generateImage(prompt: string, model?: ImageModel, size?: s
         ...(model ? { model } : {}),
         ...(size ? { size } : {}),
         ...(options.isPublic ? { is_public: true } : {}),
+        ...(options.isPromptPublic ? { is_prompt_public: true } : {}),
         n: 1,
         response_format: "b64_json",
       },
@@ -214,6 +217,9 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   }
   if (options.isPublic) {
     formData.append("is_public", "true");
+  }
+  if (options.isPromptPublic) {
+    formData.append("is_prompt_public", "true");
   }
   formData.append("n", "1");
 

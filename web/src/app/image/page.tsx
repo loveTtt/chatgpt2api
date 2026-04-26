@@ -11,6 +11,8 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -185,6 +187,8 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const [imageMode, setImageMode] = useState<ImageConversationMode>("generate");
   const [imageSize, setImageSize] = useState("");
   const [isPublic, setIsPublic] = useState(false);
+  const [isPromptPublic, setIsPromptPublic] = useState(false);
+  const [isPromptPublicDialogOpen, setIsPromptPublicDialogOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [referenceImageFiles, setReferenceImageFiles] = useState<File[]>([]);
   const [referenceImages, setReferenceImages] = useState<StoredReferenceImage[]>([]);
@@ -192,6 +196,9 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [availableQuota, setAvailableQuota] = useState("加载中...");
+  const [publicFreeRemaining, setPublicFreeRemaining] = useState<number | null>(
+    isImageLink ? Math.max(0, session.publicFreeRemaining ?? 0) : null,
+  );
   const [lightboxImages, setLightboxImages] = useState<ImageLightboxItem[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -201,6 +208,8 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
   );
+  const publicFreeRemainingLabel =
+    isImageLink && publicFreeRemaining !== null ? String(Math.max(0, publicFreeRemaining)) : "0";
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -267,8 +276,10 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
         };
         await setStoredAuthSession(nextSession);
         setAvailableQuota(String(auth.quota_remaining ?? 0));
+        setPublicFreeRemaining(Math.max(0, auth.public_free_remaining ?? 0));
       } catch {
         setAvailableQuota("--");
+        setPublicFreeRemaining(null);
       }
       return;
     }
@@ -386,6 +397,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     setImagePrompt("");
     setImageCount("1");
     setIsPublic(false);
+    setIsPromptPublic(false);
     setReferenceImageFiles([]);
     setReferenceImages([]);
     if (fileInputRef.current) {
@@ -527,6 +539,74 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     setLightboxOpen(true);
   }, []);
 
+  const submitCurrentTurn = useCallback(async (nextIsPromptPublic: boolean) => {
+    const prompt = imagePrompt.trim();
+    if (!prompt) {
+      toast.error("请输入提示词");
+      return;
+    }
+
+    if (imageMode === "edit" && referenceImageFiles.length === 0) {
+      toast.error("请先上传参考图");
+      return;
+    }
+
+    const targetConversation = selectedConversationId
+      ? conversationsRef.current.find((conversation) => conversation.id === selectedConversationId) ?? null
+      : null;
+    const now = new Date().toISOString();
+    const conversationId = targetConversation?.id ?? createId();
+    const turnId = createId();
+    const shouldPublishPrompt = isPublic && nextIsPromptPublic;
+    const draftTurn: ImageTurn = {
+      id: turnId,
+      prompt,
+      model: "auto",
+      mode: imageMode,
+      referenceImages: imageMode === "edit" ? referenceImages : [],
+      count: parsedCount,
+      size: imageSize,
+      isPublic,
+      isPromptPublic: shouldPublishPrompt,
+      images: Array.from({ length: parsedCount }, (_, index) => ({
+        id: `${turnId}-${index}`,
+        status: "loading" as const,
+      })),
+      createdAt: now,
+      status: "queued",
+    };
+
+    const baseConversation: ImageConversation = targetConversation
+      ? {
+          ...targetConversation,
+          updatedAt: now,
+          turns: [...targetConversation.turns, draftTurn],
+        }
+      : {
+          id: conversationId,
+          title: buildConversationTitle(prompt),
+          createdAt: now,
+          updatedAt: now,
+          turns: [draftTurn],
+        };
+
+    setSelectedConversationId(conversationId);
+    setIsPromptPublic(shouldPublishPrompt);
+    clearComposerInputs();
+
+    await persistConversation(baseConversation);
+    void runConversationQueue(conversationId);
+
+    const targetStats = getImageConversationStats(baseConversation);
+    if (targetStats.running > 0 || targetStats.queued > 1) {
+      toast.success("已加入当前对话队列");
+    } else if (!targetConversation) {
+      toast.success("已创建新对话并开始处理");
+    } else {
+      toast.success("已发送到当前对话");
+    }
+  }, [clearComposerInputs, imageMode, imagePrompt, imageSize, isPublic, parsedCount, persistConversation, referenceImageFiles.length, referenceImages, selectedConversationId]);
+
   /* eslint-disable react-hooks/preserve-manual-memoization */
   const runConversationQueue = useCallback(
     async (conversationId: string) => {
@@ -596,9 +676,11 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
               queuedTurn.mode === "edit"
                 ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size, {
                     isPublic: queuedTurn.isPublic,
+                    isPromptPublic: queuedTurn.isPromptPublic,
                   })
                 : await generateImage(queuedTurn.prompt, queuedTurn.model, queuedTurn.size, {
                     isPublic: queuedTurn.isPublic,
+                    isPromptPublic: queuedTurn.isPromptPublic,
                   });
             const first = data.data?.[0];
             if (!first?.b64_json) {
@@ -754,61 +836,53 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
       return;
     }
 
-    const targetConversation = selectedConversationId
-      ? conversationsRef.current.find((conversation) => conversation.id === selectedConversationId) ?? null
-      : null;
-    const now = new Date().toISOString();
-    const conversationId = targetConversation?.id ?? createId();
-    const turnId = createId();
-    const draftTurn: ImageTurn = {
-      id: turnId,
-      prompt,
-      model: "auto",
-      mode: imageMode,
-      referenceImages: imageMode === "edit" ? referenceImages : [],
-      count: parsedCount,
-      size: imageSize,
-      isPublic,
-      images: Array.from({ length: parsedCount }, (_, index) => ({
-        id: `${turnId}-${index}`,
-        status: "loading" as const,
-      })),
-      createdAt: now,
-      status: "queued",
-    };
-
-    const baseConversation: ImageConversation = targetConversation
-      ? {
-          ...targetConversation,
-          updatedAt: now,
-          turns: [...targetConversation.turns, draftTurn],
-        }
-      : {
-          id: conversationId,
-          title: buildConversationTitle(prompt),
-          createdAt: now,
-          updatedAt: now,
-          turns: [draftTurn],
-        };
-
-    setSelectedConversationId(conversationId);
-    clearComposerInputs();
-
-    await persistConversation(baseConversation);
-    void runConversationQueue(conversationId);
-
-    const targetStats = getImageConversationStats(baseConversation);
-    if (targetStats.running > 0 || targetStats.queued > 1) {
-      toast.success("已加入当前对话队列");
-    } else if (!targetConversation) {
-      toast.success("已创建新对话并开始处理");
-    } else {
-      toast.success("已发送到当前对话");
+    if (isPublic && isImageLink) {
+      setIsPromptPublicDialogOpen(true);
+      return;
     }
+
+    await submitCurrentTurn(false);
   };
 
   return (
     <>
+      <Dialog open={isPromptPublicDialogOpen} onOpenChange={setIsPromptPublicDialogOpen}>
+        <DialogContent className="rounded-[28px] border-stone-200 bg-white p-6">
+          <DialogHeader className="gap-3">
+            <DialogTitle>是否同时公开提示词？</DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-stone-500">
+              公开提示词可使用免扣除额度。当前剩余免扣除额度：{publicFreeRemainingLabel}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-600">
+            仅公开作品图片时，提示词不会展示在作品页和分享详情里，也不会消耗公开免扣额度。
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-full border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+              onClick={async () => {
+                setIsPromptPublicDialogOpen(false);
+                await submitCurrentTurn(false);
+              }}
+            >
+              仅公开图片
+            </Button>
+            <Button
+              type="button"
+              className="rounded-full bg-stone-950 text-white hover:bg-stone-800"
+              onClick={async () => {
+                setIsPromptPublicDialogOpen(false);
+                await submitCurrentTurn(true);
+              }}
+            >
+              公开提示词并发送
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <section className="mx-auto grid h-[calc(100vh-5rem)] min-h-0 w-full max-w-[1380px] grid-cols-1 gap-3 px-3 pb-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <div className="hidden h-full min-h-0 border-r border-stone-200/70 pr-3 lg:block">
           <ImageSidebar
@@ -906,7 +980,12 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             onPromptChange={setImagePrompt}
             onImageCountChange={setImageCount}
             onImageSizeChange={setImageSize}
-            onPublicChange={setIsPublic}
+            onPublicChange={(checked) => {
+              setIsPublic(checked);
+              if (!checked) {
+                setIsPromptPublic(false);
+              }
+            }}
             onSubmit={handleSubmit}
             onPickReferenceImage={() => fileInputRef.current?.click()}
             onReferenceImageChange={handleReferenceImageChange}

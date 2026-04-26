@@ -71,7 +71,7 @@ export function ImageResults({
         }));
         const successfulTurnImages = turn.images.flatMap((image) =>
           image.status === "success" && image.b64_json
-            ? [{ id: image.id, src: `data:image/png;base64,${image.b64_json}`, prompt: turn.prompt }]
+            ? [{ id: image.id, src: `data:image/png;base64,${image.b64_json}`, prompt: turn.isPromptPublic ? turn.prompt : "" }]
             : [],
         );
 
@@ -87,6 +87,9 @@ export function ImageResults({
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="text-right">{turn.prompt}</div>
+                  {!turn.isPromptPublic && turn.isPublic ? (
+                    <div className="text-xs text-stone-400">当前仅公开作品图片，提示词不会出现在公开作品页。</div>
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="sm"

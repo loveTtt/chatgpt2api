@@ -34,6 +34,7 @@ export type ImageTurn = {
   createdAt: string;
   status: ImageTurnStatus;
   isPublic?: boolean;
+  isPromptPublic?: boolean;
   error?: string;
 };
 
@@ -138,6 +139,7 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
         ? turn.status
         : derivedStatus,
     isPublic: turn.isPublic === true,
+    isPromptPublic: turn.isPromptPublic === true,
     error: typeof turn.error === "string" ? turn.error : undefined,
   };
 }
@@ -160,6 +162,8 @@ function normalizeConversation(conversation: ImageConversation & Record<string, 
             conversation.status === "generating" || conversation.status === "success" || conversation.status === "error"
               ? conversation.status
               : "success",
+          isPublic: conversation.isPublic === true,
+          isPromptPublic: conversation.isPromptPublic === true,
           error: typeof conversation.error === "string" ? conversation.error : undefined,
         }),
       ];
