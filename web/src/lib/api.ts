@@ -6,11 +6,13 @@ export type ImageModel = "auto" | "gpt-image-1" | "gpt-image-2";
 export type AuthRole = "admin" | "user";
 export type PublicWork = {
   id: string;
+  title?: string;
   prompt: string;
   revised_prompt: string;
   image_url: string;
   width: number;
   height: number;
+  file_size_bytes?: number;
   created_at: string;
 };
 
@@ -69,19 +71,6 @@ export type SettingsConfig = {
   refresh_account_interval_minute?: number | string;
   [key: string]: unknown;
 };
-
-export type PromptOptimizeResponse = {
-  original_prompt: string;
-  optimized_prompt: string;
-  model: string;
-};
-
-export async function optimizeImagePrompt(prompt: string) {
-  return httpRequest<PromptOptimizeResponse>("/api/image/prompts/optimize", {
-    method: "POST",
-    body: { prompt },
-  });
-}
 
 export type UserKey = {
   id: string;

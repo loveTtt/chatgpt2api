@@ -1,20 +1,33 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ChevronLeft, ChevronRight, Copy, Download, Share2, X } from "lucide-react";
+import { BookmarkPlus, ChevronLeft, ChevronRight, Copy, Download, Share2, X } from "lucide-react";
 import { toast } from "sonner";
 
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { upsertCustomQuickPrompt } from "@/lib/image-quick-prompts";
 import { cn } from "@/lib/utils";
 
 type LightboxImage = {
   id: string;
   src: string;
+  title?: string;
   prompt?: string;
   revisedPrompt?: string;
   downloadName?: string;
   width?: number;
   height?: number;
+  fileSizeBytes?: number;
   createdAt?: string;
   shareUrl?: string;
 };
@@ -26,6 +39,7 @@ type ImageLightboxProps = {
   onOpenChange: (open: boolean) => void;
   onIndexChange: (index: number) => void;
   variant?: "overlay" | "details";
+  hidePromptOverlay?: boolean;
 };
 
 function formatDetailTime(value?: string) {
@@ -45,6 +59,17 @@ function formatDetailTime(value?: string) {
   }).format(date);
 }
 
+function formatFileSize(value?: number) {
+  const size = Number(value || 0);
+  if (!size) {
+    return "—";
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(2)} MB`;
+}
+
 function DetailField({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-1.5 rounded-2xl bg-stone-50/90 px-4 py-3">
@@ -61,10 +86,19 @@ export function ImageLightbox({
   onOpenChange,
   onIndexChange,
   variant = "overlay",
+  hidePromptOverlay = false,
 }: ImageLightboxProps) {
   const current = images[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
+  const [isQuickPromptDialogOpen, setIsQuickPromptDialogOpen] = useState(false);
+  const [quickPromptName, setQuickPromptName] = useState("");
+
+  useEffect(() => {
+    if (!isQuickPromptDialogOpen) {
+      setQuickPromptName("");
+    }
+  }, [isQuickPromptDialogOpen, current?.id]);
 
   const goPrev = useCallback(() => {
     if (hasPrev) onIndexChange(currentIndex - 1);
@@ -126,198 +160,270 @@ export function ImageLightbox({
     }
   }, [current]);
 
+  const handleSaveQuickPrompt = useCallback(() => {
+    try {
+      const result = upsertCustomQuickPrompt({
+        name: quickPromptName,
+        prompt: String(current?.prompt || ""),
+      });
+      setIsQuickPromptDialogOpen(false);
+      toast.success(result.created ? "已加入快捷提示词" : "已更新快捷提示词名称");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "加入快捷提示词失败");
+    }
+  }, [current?.prompt, quickPromptName]);
+
   if (!current) return null;
 
   const sizeLabel = current.width && current.height ? `${current.width} × ${current.height}` : "—";
   const isDetails = variant === "details";
+  const title = String(current.title || "").trim() || "未命名作品";
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
-        <DialogPrimitive.Content
-          className={cn(
-            "fixed inset-0 z-50 outline-none",
-            isDetails ? "flex items-center justify-center p-3 sm:p-6" : "flex items-center justify-center",
-          )}
-          onPointerDownOutside={(e) => e.preventDefault()}
-        >
-          <DialogPrimitive.Title className="sr-only">图片预览</DialogPrimitive.Title>
-
-          {isDetails ? (
-            <div className="relative flex h-full max-h-[92vh] w-full max-w-[1360px] flex-col overflow-hidden rounded-[32px] border border-white/15 bg-[#f4ece3]/95 shadow-[0_32px_120px_-40px_rgba(15,23,42,0.45)] lg:flex-row">
-              <div className="relative flex min-h-[320px] min-w-0 flex-1 items-center justify-center p-3 sm:p-5 lg:p-7">
-                {images.length > 1 ? (
-                  <span className="absolute left-4 top-4 z-10 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-white/90">
-                    {currentIndex + 1} / {images.length}
-                  </span>
-                ) : null}
-                {hasPrev ? (
-                  <button
-                    type="button"
-                    onClick={goPrev}
-                    className="absolute left-4 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 transition hover:bg-black/65"
-                    aria-label="上一张"
-                  >
-                    <ChevronLeft className="size-5" />
-                  </button>
-                ) : null}
-                {hasNext ? (
-                  <button
-                    type="button"
-                    onClick={goNext}
-                    className="absolute right-4 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 transition hover:bg-black/65"
-                    aria-label="下一张"
-                  >
-                    <ChevronRight className="size-5" />
-                  </button>
-                ) : null}
-                <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-[28px] border border-[#e9dcc8] bg-[#f8f1e8] p-3 sm:p-4 lg:p-6">
-                  <img
-                    src={current.src}
-                    alt=""
-                    className="max-h-full max-w-full rounded-[24px] object-contain"
-                    draggable={false}
-                  />
-                </div>
+    <>
+      <Dialog open={isQuickPromptDialogOpen} onOpenChange={setIsQuickPromptDialogOpen}>
+        <DialogContent className="rounded-[28px] border-stone-200 bg-[#f8f3ec] p-6">
+          <DialogHeader className="gap-3">
+            <DialogTitle>加入快捷操作</DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-stone-500">
+              给这条提示词起一个显示名称，保存后可在画图页一键覆盖输入框。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-stone-700">显示名称</div>
+              <Input
+                value={quickPromptName}
+                onChange={(event) => setQuickPromptName(event.target.value)}
+                placeholder="例如：电影感体育海报"
+                className="h-11 rounded-2xl border-stone-200 bg-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="text-sm font-medium text-stone-700">提示词</div>
+              <div className="max-h-[220px] overflow-y-auto rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm leading-6 text-stone-600">
+                {current.prompt || "无提示词"}
               </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-full border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+              onClick={() => setIsQuickPromptDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              className="rounded-full bg-stone-950 text-white hover:bg-stone-800"
+              onClick={handleSaveQuickPrompt}
+            >
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-              <aside className="flex w-full max-w-[420px] shrink-0 flex-col gap-4 overflow-y-auto border-t border-[#eadfce] bg-white/78 p-4 backdrop-blur-md sm:p-6 lg:border-t-0 lg:border-l">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">已公开</span>
-                    <h2 className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">单图作品详情</h2>
+      <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+          <DialogPrimitive.Content
+            className={cn(
+              "fixed inset-0 z-50 outline-none",
+              isDetails ? "flex items-center justify-center p-3 sm:p-6" : "flex items-center justify-center",
+            )}
+            onPointerDownOutside={(e) => e.preventDefault()}
+          >
+            <DialogPrimitive.Title className="sr-only">图片预览</DialogPrimitive.Title>
+
+            {isDetails ? (
+              <div className="relative flex h-full max-h-[92vh] w-full max-w-[1360px] flex-col overflow-hidden rounded-[32px] border border-white/15 bg-[#f4ece3]/95 shadow-[0_32px_120px_-40px_rgba(15,23,42,0.45)] lg:flex-row">
+                <div className="relative flex min-h-[320px] min-w-0 flex-1 items-center justify-center p-3 sm:p-5 lg:p-7">
+                  {images.length > 1 ? (
+                    <span className="absolute left-4 top-4 z-10 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-white/90">
+                      {currentIndex + 1} / {images.length}
+                    </span>
+                  ) : null}
+                  {hasPrev ? (
+                    <button
+                      type="button"
+                      onClick={goPrev}
+                      className="absolute left-4 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 transition hover:bg-black/65"
+                      aria-label="上一张"
+                    >
+                      <ChevronLeft className="size-5" />
+                    </button>
+                  ) : null}
+                  {hasNext ? (
+                    <button
+                      type="button"
+                      onClick={goNext}
+                      className="absolute right-4 top-1/2 z-10 inline-flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 transition hover:bg-black/65"
+                      aria-label="下一张"
+                    >
+                      <ChevronRight className="size-5" />
+                    </button>
+                  ) : null}
+                  <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-[28px] border border-[#e9dcc8] bg-[#f8f1e8] p-3 sm:p-4 lg:p-6">
+                    <img
+                      src={current.src}
+                      alt=""
+                      className="max-h-full max-w-full rounded-[24px] object-contain"
+                      draggable={false}
+                    />
                   </div>
-                  <DialogPrimitive.Close className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:text-stone-900">
+                </div>
+
+                <aside className="flex w-full max-w-[420px] shrink-0 flex-col gap-4 overflow-y-auto border-t border-[#eadfce] bg-white/78 p-4 backdrop-blur-md sm:p-6 lg:border-t-0 lg:border-l">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">已公开</span>
+                      <h2 className="mt-4 text-3xl font-semibold tracking-tight text-stone-950">{title}</h2>
+                    </div>
+                    <DialogPrimitive.Close className="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-500 transition hover:border-stone-300 hover:text-stone-900">
+                      <X className="size-4" />
+                      <span className="sr-only">关闭</span>
+                    </DialogPrimitive.Close>
+                  </div>
+
+                  <section className="space-y-4 rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                      <DetailField label="尺寸" value={sizeLabel} />
+                      <DetailField label="文件大小" value={formatFileSize(current.fileSizeBytes)} />
+                      <DetailField label="作品创建时间" value={formatDetailTime(current.createdAt)} />
+                    </div>
+                    <div className="flex flex-wrap gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleDownload}
+                        className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-stone-950 px-5 text-sm font-medium text-white transition hover:bg-stone-800"
+                      >
+                        <Download className="size-4" />
+                        下载图片
+                      </button>
+                      {current.shareUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleShare()}
+                          className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+                        >
+                          <Share2 className="size-4" />
+                          分享作品
+                        </button>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section className="space-y-4 rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="text-2xl font-semibold tracking-tight text-stone-950">提示词</h3>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleCopyPrompt()}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+                        >
+                          <Copy className="size-4" />
+                          复制提示词
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsQuickPromptDialogOpen(true)}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+                        >
+                          <BookmarkPlus className="size-4" />
+                          加入快捷操作
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">生成提示词</div>
+                      <div className="max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-700">
+                        {current.prompt || "无提示词"}
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
+            ) : (
+              <>
+                <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+                  {images.length > 1 && (
+                    <span className="rounded-full bg-black/50 px-3 py-1.5 text-xs font-medium text-white/90">
+                      {currentIndex + 1} / {images.length}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleDownload}
+                    className="inline-flex size-9 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70"
+                    aria-label="下载图片"
+                  >
+                    <Download className="size-4" />
+                  </button>
+                  <DialogPrimitive.Close className="inline-flex size-9 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70">
                     <X className="size-4" />
                     <span className="sr-only">关闭</span>
                   </DialogPrimitive.Close>
                 </div>
 
-                <section className="space-y-4 rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-                    <DetailField label="尺寸" value={sizeLabel} />
-                    <DetailField label="作品创建时间" value={formatDetailTime(current.createdAt)} />
-                  </div>
-                  <div className="flex flex-wrap gap-3 pt-1">
-                    <button
-                      type="button"
-                      onClick={handleDownload}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-stone-950 px-5 text-sm font-medium text-white transition hover:bg-stone-800"
-                    >
-                      <Download className="size-4" />
-                      下载图片
-                    </button>
-                    {current.shareUrl ? (
-                      <button
-                        type="button"
-                        onClick={() => void handleShare()}
-                        className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-5 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
-                      >
-                        <Share2 className="size-4" />
-                        分享作品
-                      </button>
+                {hasPrev && (
+                  <button
+                    type="button"
+                    onClick={goPrev}
+                    className="absolute left-4 z-10 inline-flex size-10 items-center justify-center rounded-full bg-black/40 text-white/90 transition hover:bg-black/60"
+                    aria-label="上一张"
+                  >
+                    <ChevronLeft className="size-5" />
+                  </button>
+                )}
+
+                <div
+                  className="flex max-h-[90vh] max-w-[90vw] items-center justify-center"
+                  onClick={() => onOpenChange(false)}
+                >
+                  <img
+                    src={current.src}
+                    alt=""
+                    className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+                    onClick={(e) => e.stopPropagation()}
+                    draggable={false}
+                  />
+                </div>
+
+                {hasNext && (
+                  <button
+                    type="button"
+                    onClick={goNext}
+                    className="absolute right-4 z-10 inline-flex size-10 items-center justify-center rounded-full bg-black/40 text-white/90 transition hover:bg-black/60"
+                    aria-label="下一张"
+                  >
+                    <ChevronRight className="size-5" />
+                  </button>
+                )}
+                {!hidePromptOverlay && (current.prompt || current.revisedPrompt) ? (
+                  <div className="absolute inset-x-4 bottom-4 z-10 mx-auto max-w-3xl rounded-3xl border border-white/10 bg-black/60 p-4 text-white shadow-2xl backdrop-blur-md">
+                    {current.prompt ? (
+                      <div className="text-sm leading-6 text-white/90">
+                        <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-white/45">Prompt</div>
+                        {current.prompt}
+                      </div>
+                    ) : null}
+                    {current.revisedPrompt ? (
+                      <div className="mt-3 border-t border-white/10 pt-3 text-xs leading-5 text-white/65">
+                        <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-white/35">Revised</div>
+                        {current.revisedPrompt}
+                      </div>
                     ) : null}
                   </div>
-                </section>
-
-                <section className="space-y-4 rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-2xl font-semibold tracking-tight text-stone-950">提示词</h3>
-                    <button
-                      type="button"
-                      onClick={() => void handleCopyPrompt()}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
-                    >
-                      <Copy className="size-4" />
-                      复制提示词
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">生成提示词</div>
-                    <div className="max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-700">
-                      {current.prompt || "无提示词"}
-                    </div>
-                  </div>
-                </section>
-              </aside>
-            </div>
-          ) : (
-            <>
-              <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-                {images.length > 1 && (
-                  <span className="rounded-full bg-black/50 px-3 py-1.5 text-xs font-medium text-white/90">
-                    {currentIndex + 1} / {images.length}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  className="inline-flex size-9 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70"
-                  aria-label="下载图片"
-                >
-                  <Download className="size-4" />
-                </button>
-                <DialogPrimitive.Close className="inline-flex size-9 items-center justify-center rounded-full bg-black/50 text-white/90 transition hover:bg-black/70">
-                  <X className="size-4" />
-                  <span className="sr-only">关闭</span>
-                </DialogPrimitive.Close>
-              </div>
-
-              {hasPrev && (
-                <button
-                  type="button"
-                  onClick={goPrev}
-                  className="absolute left-4 z-10 inline-flex size-10 items-center justify-center rounded-full bg-black/40 text-white/90 transition hover:bg-black/60"
-                  aria-label="上一张"
-                >
-                  <ChevronLeft className="size-5" />
-                </button>
-              )}
-
-              <div
-                className="flex max-h-[90vh] max-w-[90vw] items-center justify-center"
-                onClick={() => onOpenChange(false)}
-              >
-                <img
-                  src={current.src}
-                  alt=""
-                  className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
-                  onClick={(e) => e.stopPropagation()}
-                  draggable={false}
-                />
-              </div>
-
-              {hasNext && (
-                <button
-                  type="button"
-                  onClick={goNext}
-                  className="absolute right-4 z-10 inline-flex size-10 items-center justify-center rounded-full bg-black/40 text-white/90 transition hover:bg-black/60"
-                  aria-label="下一张"
-                >
-                  <ChevronRight className="size-5" />
-                </button>
-              )}
-              {current.prompt || current.revisedPrompt ? (
-                <div className="absolute inset-x-4 bottom-4 z-10 mx-auto max-w-3xl rounded-3xl border border-white/10 bg-black/60 p-4 text-white shadow-2xl backdrop-blur-md">
-                  {current.prompt ? (
-                    <div className="text-sm leading-6 text-white/90">
-                      <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-white/45">Prompt</div>
-                      {current.prompt}
-                    </div>
-                  ) : null}
-                  {current.revisedPrompt ? (
-                    <div className="mt-3 border-t border-white/10 pt-3 text-xs leading-5 text-white/65">
-                      <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-white/35">Revised</div>
-                      {current.revisedPrompt}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </>
-          )}
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+                ) : null}
+              </>
+            )}
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+    </>
   );
 }

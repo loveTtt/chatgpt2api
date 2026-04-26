@@ -78,9 +78,11 @@ function WorksPageContent() {
       works.map((work) => ({
         id: work.id,
         src: buildWorkUrl(work.image_url),
+        title: work.title,
         prompt: work.prompt,
         width: work.width,
         height: work.height,
+        fileSizeBytes: work.file_size_bytes,
         createdAt: work.created_at,
         shareUrl: buildShareUrl(work.id),
         downloadName: `work-${work.id}.png`,
@@ -266,7 +268,8 @@ function WorksPageContent() {
                     />
                     <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-stone-950/75 via-stone-950/10 to-transparent p-4 opacity-0 transition duration-300 group-hover:opacity-100">
                       <div className="translate-y-2 transition duration-300 group-hover:translate-y-0">
-                        <p className="line-clamp-3 text-sm leading-6 text-white">{work.prompt || "无提示词"}</p>
+                        <p className="line-clamp-2 text-base font-semibold text-white">{work.title || "未命名作品"}</p>
+                        <p className="mt-2 line-clamp-3 text-sm leading-6 text-white/85">{work.prompt || "无提示词"}</p>
                         <p className="mt-2 text-xs text-white/60">{formatWorkTime(work.created_at)}</p>
                       </div>
                     </div>

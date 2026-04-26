@@ -915,6 +915,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}
         onIndexChange={setLightboxIndex}
+        hidePromptOverlay
       />
     </>
   );

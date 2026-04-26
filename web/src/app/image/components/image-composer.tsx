@@ -1,22 +1,20 @@
 "use client";
 
-import { ArrowUp, Check, ChevronDown, ImagePlus, LoaderCircle, Sparkles, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ImagePlus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObject } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { optimizeImagePrompt } from "@/lib/api";
+import {
+  builtinQuickPrompts,
+  loadCustomQuickPrompts,
+  removeCustomQuickPrompt,
+  type CustomQuickPrompt,
+  type QuickPromptItem,
+} from "@/lib/image-quick-prompts";
 import { cn } from "@/lib/utils";
 import type { ImageConversationMode } from "@/store/image-conversations";
 
@@ -38,12 +36,6 @@ type ImageComposerProps = {
   onPickReferenceImage: () => void;
   onReferenceImageChange: (files: File[]) => void | Promise<void>;
   onRemoveReferenceImage: (index: number) => void;
-};
-
-type OptimizePreview = {
-  originalPrompt: string;
-  optimizedPrompt: string;
-  model: string;
 };
 
 const imageSizeOptions = [
@@ -77,15 +69,17 @@ export function ImageComposer({
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [isSizeMenuOpen, setIsSizeMenuOpen] = useState(false);
-  const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
-  const [optimizePreview, setOptimizePreview] = useState<OptimizePreview | null>(null);
-  const [isOptimizeDialogOpen, setIsOptimizeDialogOpen] = useState(false);
+  const [customQuickPrompts, setCustomQuickPrompts] = useState<CustomQuickPrompt[]>([]);
   const sizeMenuRef = useRef<HTMLDivElement>(null);
   const lightboxImages = useMemo(
     () => referenceImages.map((image, index) => ({ id: `${image.name}-${index}`, src: image.dataUrl })),
     [referenceImages],
   );
   const currentImageSizeOption = imageSizeOptions.find((option) => option.value === imageSize) || imageSizeOptions[0];
+
+  useEffect(() => {
+    setCustomQuickPrompts(loadCustomQuickPrompts());
+  }, []);
 
   useEffect(() => {
     if (!isSizeMenuOpen) {
@@ -112,27 +106,16 @@ export function ImageComposer({
     void onReferenceImageChange(imageFiles);
   };
 
-  const handleOptimizePrompt = async () => {
-    const normalizedPrompt = prompt.trim();
-    if (!normalizedPrompt) {
-      toast.error("请输入提示词后再优化");
-      return;
-    }
+  const handleApplyQuickPrompt = (value: string) => {
+    onPromptChange(value);
+    toast.success("已应用快捷提示词");
+    textareaRef.current?.focus();
+  };
 
-    try {
-      setIsOptimizingPrompt(true);
-      const result = await optimizeImagePrompt(normalizedPrompt);
-      setOptimizePreview({
-        originalPrompt: result.original_prompt,
-        optimizedPrompt: result.optimized_prompt,
-        model: result.model,
-      });
-      setIsOptimizeDialogOpen(true);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "优化提示词失败");
-    } finally {
-      setIsOptimizingPrompt(false);
-    }
+  const handleRemoveCustomQuickPrompt = (id: string) => {
+    const nextItems = removeCustomQuickPrompt(id);
+    setCustomQuickPrompts(nextItems);
+    toast.success("已删除快捷提示词");
   };
 
   return (
@@ -149,59 +132,12 @@ export function ImageComposer({
           }}
         />
 
-        <Dialog open={isOptimizeDialogOpen} onOpenChange={setIsOptimizeDialogOpen}>
-          <DialogContent className="w-[min(92vw,760px)] border-stone-200 bg-[#f8f3ec] p-0 shadow-[0_36px_120px_-45px_rgba(16,24,40,0.45)]">
-            <div className="grid gap-0 md:grid-cols-2">
-              <div className="border-b border-stone-200/80 p-6 md:border-r md:border-b-0">
-                <DialogHeader className="gap-3">
-                  <DialogTitle className="text-2xl tracking-tight text-stone-950">优化提示词预览</DialogTitle>
-                  <DialogDescription className="text-sm leading-6 text-stone-500">
-                    当前使用 {optimizePreview?.model || "gpt-5-3-mini"} 优化，你确认后才会替换输入框内容。
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="mt-5 rounded-[24px] border border-stone-200 bg-white/90 p-4">
-                  <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">原提示词</div>
-                  <div className="max-h-[280px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-700">
-                    {optimizePreview?.originalPrompt || "—"}
-                  </div>
-                </div>
-              </div>
-              <div className="p-6">
-                <div className="rounded-[24px] border border-emerald-200/80 bg-emerald-50/80 p-4">
-                  <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-700">优化后提示词</div>
-                  <div className="max-h-[332px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-800">
-                    {optimizePreview?.optimizedPrompt || "—"}
-                  </div>
-                </div>
-                <DialogFooter className="mt-5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-full border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
-                    onClick={() => setIsOptimizeDialogOpen(false)}
-                  >
-                    取消
-                  </Button>
-                  <Button
-                    type="button"
-                    className="rounded-full bg-stone-950 text-white hover:bg-stone-800"
-                    onClick={() => {
-                      if (!optimizePreview?.optimizedPrompt) {
-                        return;
-                      }
-                      onPromptChange(optimizePreview.optimizedPrompt);
-                      setIsOptimizeDialogOpen(false);
-                      toast.success("已替换为优化后的提示词");
-                      textareaRef.current?.focus();
-                    }}
-                  >
-                    替换为优化结果
-                  </Button>
-                </DialogFooter>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <QuickPromptSection
+          builtinItems={builtinQuickPrompts}
+          customItems={customQuickPrompts}
+          onApply={handleApplyQuickPrompt}
+          onRemove={handleRemoveCustomQuickPrompt}
+        />
 
         {referenceImages.length > 0 ? (
           <div className="mb-3 flex flex-wrap gap-2 px-1">
@@ -251,6 +187,7 @@ export function ImageComposer({
               open={lightboxOpen}
               onOpenChange={setLightboxOpen}
               onIndexChange={setLightboxIndex}
+              hidePromptOverlay
             />
             <Textarea
               ref={textareaRef}
@@ -347,17 +284,6 @@ export function ImageComposer({
                     />
                     <span>公开到作品页</span>
                   </label>
-
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
-                    onClick={() => void handleOptimizePrompt()}
-                    disabled={isOptimizingPrompt}
-                  >
-                    {isOptimizingPrompt ? <LoaderCircle className="size-3.5 animate-spin sm:size-4" /> : <Sparkles className="size-3.5 sm:size-4" />}
-                    <span>优化提示词</span>
-                  </Button>
                 </div>
 
                 <button
@@ -374,6 +300,78 @@ export function ImageComposer({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function QuickPromptSection({
+  builtinItems,
+  customItems,
+  onApply,
+  onRemove,
+}: {
+  builtinItems: QuickPromptItem[];
+  customItems: CustomQuickPrompt[];
+  onApply: (prompt: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="mb-3 rounded-[28px] border border-stone-200 bg-white/80 p-4 sm:p-5">
+      <div className="space-y-4">
+        <QuickPromptGroup title="公共参考" items={builtinItems} onApply={onApply} />
+        <QuickPromptGroup title="我的快捷提示词" items={customItems} onApply={onApply} onRemove={onRemove} emptyText="还没有添加快捷提示词，可从作品详情页加入。" />
+      </div>
+    </div>
+  );
+}
+
+function QuickPromptGroup({
+  title,
+  items,
+  onApply,
+  onRemove,
+  emptyText,
+}: {
+  title: string;
+  items: QuickPromptItem[];
+  onApply: (prompt: string) => void;
+  onRemove?: (id: string) => void;
+  emptyText?: string;
+}) {
+  return (
+    <div className="space-y-2.5">
+      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">{title}</div>
+      {items.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {items.map((item) => (
+            <div key={item.id} className="group inline-flex max-w-full items-center rounded-full border border-stone-200 bg-stone-50 pr-1">
+              <button
+                type="button"
+                title={item.prompt}
+                onClick={() => onApply(item.prompt)}
+                className="max-w-[240px] truncate rounded-full px-3 py-2 text-xs font-medium text-stone-700 transition hover:bg-stone-100 hover:text-stone-950 sm:max-w-[280px] sm:text-sm"
+              >
+                {item.name}
+              </button>
+              {onRemove ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemove(item.id);
+                  }}
+                  className="inline-flex size-7 items-center justify-center rounded-full text-stone-400 transition hover:bg-white hover:text-stone-700"
+                  aria-label={`删除快捷提示词 ${item.name}`}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-500">{emptyText || "暂无数据"}</div>
+      )}
     </div>
   );
 }
