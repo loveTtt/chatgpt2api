@@ -5,6 +5,7 @@ import hashlib
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+import threading
 import time
 from urllib.parse import urlparse, unquote
 import uuid
@@ -16,6 +17,7 @@ from services.config import config
 from services.storage.base import StorageBackend
 
 PublicWorkSource = Literal["generation", "edit"]
+DEFAULT_PUBLIC_WORK_TITLE = "未命名作品"
 
 
 def _now_iso() -> str:
@@ -30,18 +32,19 @@ class PublicWorkService:
     def __init__(self, storage: StorageBackend):
         self.storage = storage
         self._title_generator: Callable[[str, str], str] | None = None
+        self._lock = threading.Lock()
 
     def set_title_generator(self, generator: Callable[[str, str], str]) -> None:
         self._title_generator = generator
 
     def _generate_title(self, prompt: str, revised_prompt: str) -> str:
         if not self._title_generator:
-            return "未命名作品"
+            return DEFAULT_PUBLIC_WORK_TITLE
         try:
             title = _clean(self._title_generator(prompt, revised_prompt))
         except Exception:
-            return "未命名作品"
-        return title or "未命名作品"
+            return DEFAULT_PUBLIC_WORK_TITLE
+        return title or DEFAULT_PUBLIC_WORK_TITLE
 
     @staticmethod
     def _public_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -106,6 +109,56 @@ class PublicWorkService:
             return None
         return candidate
 
+    def _prepend_public_works(self, items: list[dict[str, Any]]) -> None:
+        with self._lock:
+            existing_items = self.storage.load_public_works()
+            self.storage.save_public_works([*items, *existing_items])
+
+    def _update_public_work_title(self, work_id: str, title: str) -> bool:
+        normalized_work_id = _clean(work_id)
+        normalized_title = _clean(title)
+        if not normalized_work_id or not normalized_title:
+            return False
+        with self._lock:
+            items = self.storage.load_public_works()
+            updated = False
+            for item in items:
+                if not isinstance(item, dict) or _clean(item.get("id")) != normalized_work_id:
+                    continue
+                current_title = _clean(item.get("title"))
+                if current_title and current_title != DEFAULT_PUBLIC_WORK_TITLE:
+                    return False
+                item["title"] = normalized_title
+                updated = True
+                break
+            if updated:
+                self.storage.save_public_works(items)
+            return updated
+
+    def _backfill_public_work_titles(self, items: list[dict[str, Any]], prompt: str, revised_prompts: dict[str, str]) -> None:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            work_id = _clean(item.get("id"))
+            revised_prompt = _clean(revised_prompts.get(work_id))
+            if not work_id:
+                continue
+            title = self._generate_title(prompt, revised_prompt)
+            if title == DEFAULT_PUBLIC_WORK_TITLE:
+                continue
+            self._update_public_work_title(work_id, title)
+
+    def _start_title_backfill(self, items: list[dict[str, Any]], prompt: str, revised_prompts: dict[str, str]) -> None:
+        if not items or not self._title_generator:
+            return
+        thread = threading.Thread(
+            target=self._backfill_public_work_titles,
+            args=(items, prompt, revised_prompts),
+            name="public-work-title-backfill",
+            daemon=True,
+        )
+        thread.start()
+
     def list_public_works(self, limit: int = 60) -> list[dict[str, Any]]:
         items = self.storage.load_public_works()
         public_items = [self._public_item(item) for item in items if isinstance(item, dict) and _clean(item.get("image_url"))]
@@ -129,20 +182,21 @@ class PublicWorkService:
         normalized_work_id = _clean(work_id)
         if not normalized_work_id:
             return False
-        items = self.storage.load_public_works()
-        removed_item: dict[str, Any] | None = None
-        next_items: list[dict[str, Any]] = []
-        for item in items:
-            if not isinstance(item, dict):
+        with self._lock:
+            items = self.storage.load_public_works()
+            removed_item: dict[str, Any] | None = None
+            next_items: list[dict[str, Any]] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    next_items.append(item)
+                    continue
+                if removed_item is None and _clean(item.get("id")) == normalized_work_id:
+                    removed_item = item
+                    continue
                 next_items.append(item)
-                continue
-            if removed_item is None and _clean(item.get("id")) == normalized_work_id:
-                removed_item = item
-                continue
-            next_items.append(item)
-        if removed_item is None:
-            return False
-        self.storage.save_public_works(next_items)
+            if removed_item is None:
+                return False
+            self.storage.save_public_works(next_items)
         image_file_path = self._resolve_image_file_path(removed_item.get("image_url"))
         if image_file_path and image_file_path.exists():
             image_file_path.unlink()
@@ -165,6 +219,7 @@ class PublicWorkService:
             return []
 
         created_items: list[dict[str, Any]] = []
+        revised_prompts: dict[str, str] = {}
         created_at = _now_iso()
         public_prompt = prompt if is_prompt_public else ""
         for item in data:
@@ -174,13 +229,15 @@ class PublicWorkService:
             if not image_data:
                 continue
             width, height = self._image_size(image_data)
-            revised_prompt = _clean(item.get("revised_prompt")) if is_prompt_public else ""
+            original_revised_prompt = _clean(item.get("revised_prompt"))
+            work_id = uuid.uuid4().hex
+            revised_prompts[work_id] = original_revised_prompt
             created_items.append(
                 {
-                    "id": uuid.uuid4().hex,
-                    "title": self._generate_title(prompt, _clean(item.get("revised_prompt"))),
+                    "id": work_id,
+                    "title": DEFAULT_PUBLIC_WORK_TITLE,
                     "prompt": public_prompt,
-                    "revised_prompt": revised_prompt,
+                    "revised_prompt": original_revised_prompt if is_prompt_public else "",
                     "is_prompt_public": bool(is_prompt_public),
                     "image_url": self._save_image(image_data, base_url),
                     "width": width,
@@ -194,8 +251,8 @@ class PublicWorkService:
             )
 
         if created_items:
-            existing_items = self.storage.load_public_works()
-            self.storage.save_public_works([*created_items, *existing_items])
+            self._prepend_public_works(created_items)
+            self._start_title_backfill(created_items, prompt, revised_prompts)
         return [self._public_item(item) for item in created_items]
 
 

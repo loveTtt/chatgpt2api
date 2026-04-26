@@ -1065,7 +1065,7 @@ class ChatGPTService:
             user_content = f"原始提示词：{prompt_text}\n优化后提示词：{revised_text}"
 
         body = {
-            "model": "gpt-5-3-mini",
+            "model": "gpt-5.4-mini",
             "messages": [
                 {
                     "role": "system",
