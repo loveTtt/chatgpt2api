@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 import time
+from urllib.parse import urlparse, unquote
 import uuid
 from typing import Any, Literal, Callable
 
@@ -85,6 +86,24 @@ class PublicWorkService:
         normalized_base_url = _clean(base_url or config.base_url).rstrip("/")
         return f"{normalized_base_url}{image_path}" if normalized_base_url else image_path
 
+    @staticmethod
+    def _resolve_image_file_path(image_url: object) -> Path | None:
+        raw_value = _clean(image_url)
+        if not raw_value:
+            return None
+        parsed = urlparse(raw_value)
+        image_path = unquote(parsed.path or raw_value)
+        if not image_path.startswith("/images/"):
+            return None
+        relative_path = Path(image_path.removeprefix("/images/"))
+        candidate = (config.images_dir / relative_path).resolve()
+        base_dir = config.images_dir.resolve()
+        try:
+            candidate.relative_to(base_dir)
+        except ValueError:
+            return None
+        return candidate
+
     def list_public_works(self, limit: int = 60) -> list[dict[str, Any]]:
         items = self.storage.load_public_works()
         public_items = [self._public_item(item) for item in items if isinstance(item, dict) and _clean(item.get("image_url"))]
@@ -103,6 +122,29 @@ class PublicWorkService:
                 continue
             return self._public_item(item)
         return None
+
+    def delete_public_work(self, work_id: str) -> bool:
+        normalized_work_id = _clean(work_id)
+        if not normalized_work_id:
+            return False
+        items = self.storage.load_public_works()
+        removed_item: dict[str, Any] | None = None
+        next_items: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                next_items.append(item)
+                continue
+            if removed_item is None and _clean(item.get("id")) == normalized_work_id:
+                removed_item = item
+                continue
+            next_items.append(item)
+        if removed_item is None:
+            return False
+        self.storage.save_public_works(next_items)
+        image_file_path = self._resolve_image_file_path(removed_item.get("image_url"))
+        if image_file_path and image_file_path.exists():
+            image_file_path.unlink()
+        return True
 
     def publish(
         self,

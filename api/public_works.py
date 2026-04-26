@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 
+from api.support import require_admin
 from services.public_work_service import public_work_service
 
 
@@ -20,5 +21,12 @@ def create_router() -> APIRouter:
         if not item:
             raise HTTPException(status_code=404, detail={"error": "public work not found"})
         return {"item": item}
+
+    @router.delete("/api/public-works/{work_id}")
+    async def delete_public_work(work_id: str, authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        if not await run_in_threadpool(public_work_service.delete_public_work, work_id):
+            raise HTTPException(status_code=404, detail={"error": "public work not found"})
+        return {"ok": True}
 
     return router
