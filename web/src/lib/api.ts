@@ -207,9 +207,17 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   );
 }
 
-export async function fetchPublicWorks(limit = 60) {
+export async function fetchPublicWorks(limit = 60, options: { redirectOnUnauthorized?: boolean } = {}) {
   const search = new URLSearchParams({ limit: String(limit) });
-  return httpRequest<{ items: PublicWork[] }>(`/api/public-works?${search.toString()}`);
+  return httpRequest<{ items: PublicWork[] }>(`/api/public-works?${search.toString()}`, {
+    redirectOnUnauthorized: options.redirectOnUnauthorized ?? false,
+  });
+}
+
+export async function fetchPublicWorkById(workId: string, options: { redirectOnUnauthorized?: boolean } = {}) {
+  return httpRequest<{ item: PublicWork }>(`/api/public-works/${workId}`, {
+    redirectOnUnauthorized: options.redirectOnUnauthorized ?? false,
+  });
 }
 
 export async function fetchSettingsConfig() {

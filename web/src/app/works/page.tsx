@@ -1,13 +1,13 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
-import { fetchPublicWorks, type PublicWork } from "@/lib/api";
-import { useAuthGuard } from "@/lib/use-auth-guard";
+import { fetchPublicWorkById, fetchPublicWorks, type PublicWork } from "@/lib/api";
 
 function formatWorkTime(value: string) {
   const date = new Date(value);
@@ -33,11 +33,45 @@ function buildWorkUrl(url: string) {
   }
 }
 
+function buildShareUrl(workId: string) {
+  if (typeof window === "undefined") {
+    return `/works?view=${encodeURIComponent(workId)}`;
+  }
+  const url = new URL("/works", window.location.origin);
+  url.searchParams.set("view", workId);
+  return url.toString();
+}
+
 function WorksPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewWorkId = String(searchParams.get("view") || "").trim();
   const [works, setWorks] = useState<PublicWork[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isResolvingSharedWork, setIsResolvingSharedWork] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  const buildWorksUrl = useCallback(
+    (workId?: string) => {
+      const nextSearch = new URLSearchParams(searchParams.toString());
+      if (workId) {
+        nextSearch.set("view", workId);
+      } else {
+        nextSearch.delete("view");
+      }
+      const query = nextSearch.toString();
+      return query ? `/works?${query}` : "/works";
+    },
+    [searchParams],
+  );
+
+  const syncViewParam = useCallback(
+    (workId?: string) => {
+      router.replace(buildWorksUrl(workId), { scroll: false });
+    },
+    [buildWorksUrl, router],
+  );
 
   const lightboxImages = useMemo(
     () =>
@@ -46,27 +80,132 @@ function WorksPageContent() {
         src: buildWorkUrl(work.image_url),
         prompt: work.prompt,
         revisedPrompt: work.revised_prompt,
+        width: work.width,
+        height: work.height,
+        createdAt: work.created_at,
+        shareUrl: buildShareUrl(work.id),
         downloadName: `work-${work.id}.png`,
       })),
     [works],
   );
 
-  const loadWorks = async () => {
+  const loadWorks = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await fetchPublicWorks(60);
-      setWorks(data.items);
+      setWorks((current) => {
+        if (!viewWorkId) {
+          return data.items;
+        }
+        const currentViewedWork = current.find((item) => item.id === viewWorkId);
+        if (currentViewedWork && !data.items.some((item) => item.id === viewWorkId)) {
+          return [currentViewedWork, ...data.items];
+        }
+        return data.items;
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "读取作品失败";
       toast.error(message);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [viewWorkId]);
 
   useEffect(() => {
     void loadWorks();
-  }, []);
+  }, [loadWorks]);
+
+  useEffect(() => {
+    if (isLoading) {
+      return;
+    }
+
+    if (!viewWorkId) {
+      setLightboxOpen(false);
+      return;
+    }
+
+    const targetIndex = works.findIndex((work) => work.id === viewWorkId);
+    if (targetIndex >= 0) {
+      setLightboxIndex(targetIndex);
+      setLightboxOpen(true);
+      return;
+    }
+
+    let active = true;
+    setIsResolvingSharedWork(true);
+
+    const loadSharedWork = async () => {
+      try {
+        const data = await fetchPublicWorkById(viewWorkId);
+        if (!active) {
+          return;
+        }
+        setWorks((current) => {
+          if (current.some((item) => item.id === data.item.id)) {
+            return current;
+          }
+          return [data.item, ...current];
+        });
+      } catch (error) {
+        if (!active) {
+          return;
+        }
+        toast.error(error instanceof Error ? error.message : "读取作品详情失败");
+        syncViewParam();
+      } finally {
+        if (active) {
+          setIsResolvingSharedWork(false);
+        }
+      }
+    };
+
+    void loadSharedWork();
+    return () => {
+      active = false;
+    };
+  }, [isLoading, syncViewParam, viewWorkId, works]);
+
+  const handleOpenWork = useCallback(
+    (index: number) => {
+      const targetWork = works[index];
+      if (!targetWork) {
+        return;
+      }
+      setLightboxIndex(index);
+      setLightboxOpen(true);
+      syncViewParam(targetWork.id);
+    },
+    [syncViewParam, works],
+  );
+
+  const handleLightboxOpenChange = useCallback(
+    (open: boolean) => {
+      setLightboxOpen(open);
+      if (!open) {
+        syncViewParam();
+        return;
+      }
+      const targetWork = works[lightboxIndex];
+      if (targetWork) {
+        syncViewParam(targetWork.id);
+      }
+    },
+    [lightboxIndex, syncViewParam, works],
+  );
+
+  const handleLightboxIndexChange = useCallback(
+    (index: number) => {
+      setLightboxIndex(index);
+      const targetWork = works[index];
+      if (targetWork) {
+        syncViewParam(targetWork.id);
+      }
+    },
+    [syncViewParam, works],
+  );
+
+  const isBusy = isLoading || (isResolvingSharedWork && works.length === 0);
 
   return (
     <>
@@ -81,21 +220,21 @@ function WorksPageContent() {
               作品
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-500">
-              公开生成的图片会按自然比例排列在这里，点击图片可查看提示词并下载原图。
+              公开生成的图片会按自然比例排列在这里，点击图片可查看作品详情、复制分享链接并下载原图。
             </p>
           </div>
           <Button
             variant="outline"
             className="w-fit rounded-full border-stone-200 bg-white text-stone-700 shadow-none hover:bg-stone-50"
             onClick={() => void loadWorks()}
-            disabled={isLoading}
+            disabled={isBusy}
           >
-            <RefreshCw className={isLoading ? "size-4 animate-spin" : "size-4"} />
+            <RefreshCw className={isBusy ? "size-4 animate-spin" : "size-4"} />
             刷新
           </Button>
         </div>
 
-        {isLoading ? (
+        {isBusy ? (
           <div className="flex min-h-[42vh] items-center justify-center text-stone-400">
             <LoaderCircle className="size-5 animate-spin" />
           </div>
@@ -115,8 +254,7 @@ function WorksPageContent() {
                   <button
                     type="button"
                     onClick={() => {
-                      setLightboxIndex(index);
-                      setLightboxOpen(true);
+                      handleOpenWork(index);
                     }}
                     className="relative block w-full cursor-zoom-in overflow-hidden bg-stone-100 text-left"
                   >
@@ -145,25 +283,12 @@ function WorksPageContent() {
         images={lightboxImages}
         currentIndex={lightboxIndex}
         open={lightboxOpen}
-        onOpenChange={setLightboxOpen}
-        onIndexChange={setLightboxIndex}
+        onOpenChange={handleLightboxOpenChange}
+        onIndexChange={handleLightboxIndexChange}
+        variant="details"
       />
     </>
   );
-}
-
-function WorksPageGuarded() {
-  const { isCheckingAuth, session } = useAuthGuard();
-
-  if (isCheckingAuth || !session) {
-    return (
-      <div className="flex min-h-[40vh] items-center justify-center">
-        <LoaderCircle className="size-5 animate-spin text-stone-400" />
-      </div>
-    );
-  }
-
-  return <WorksPageContent />;
 }
 
 export default function WorksPage() {
@@ -175,7 +300,7 @@ export default function WorksPage() {
         </div>
       }
     >
-      <WorksPageGuarded />
+      <WorksPageContent />
     </Suspense>
   );
 }
