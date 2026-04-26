@@ -133,7 +133,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
     async def optimize_prompt(body: PromptOptimizeRequest, authorization: str | None = Header(default=None)):
         identity = require_identity(authorization)
         if is_image_link_identity(identity):
-            raise HTTPException(status_code=403, detail={"error": "image link cannot optimize prompts"})
+            _ensure_image_link_quota(identity, 1)
         _check_optimize_prompt_rate_limit(identity, authorization)
         prompt = body.prompt.strip()
         payload = {
