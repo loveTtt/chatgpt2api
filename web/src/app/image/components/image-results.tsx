@@ -22,6 +22,14 @@ type ImageResultsProps = {
   formatConversationTime: (value: string) => string;
 };
 
+const imageSizeAspectClassMap: Record<string, string> = {
+  "1:1": "aspect-square",
+  "16:9": "aspect-video",
+  "9:16": "aspect-[9/16]",
+  "4:3": "aspect-[4/3]",
+  "3:4": "aspect-[3/4]",
+};
+
 export function ImageResults({
   selectedConversation,
   onOpenLightbox,
@@ -73,9 +81,7 @@ export function ImageResults({
               <div className="max-w-[82%] px-1 py-1 text-[15px] leading-7 text-stone-900">
                 <div className="mb-2 flex flex-wrap justify-end gap-2 text-[11px] text-stone-400">
                   <span>第 {turnIndex + 1} 轮</span>
-                  <span>
-                    {turn.mode === "edit" ? "编辑图" : "文生图"}
-                  </span>
+                  <span>{turn.mode === "edit" ? "编辑图" : "文生图"}</span>
                   <span>{getTurnStatusLabel(turn.status)}</span>
                   <span>{formatConversationTime(turn.createdAt)}</span>
                 </div>
@@ -131,7 +137,6 @@ export function ImageResults({
 
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-stone-500">
                   <span className="rounded-full bg-stone-100 px-3 py-1">{turn.count} 张</span>
-                  <span className="rounded-full bg-stone-100 px-3 py-1">{getTurnStatusLabel(turn.status)}</span>
                   {turn.status === "queued" ? (
                     <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">等待当前对话中的前序任务完成</span>
                   ) : null}
@@ -143,10 +148,7 @@ export function ImageResults({
                       const currentIndex = successfulTurnImages.findIndex((item) => item.id === image.id);
 
                       return (
-                        <div
-                          key={image.id}
-                          className="break-inside-avoid overflow-hidden"
-                        >
+                        <div key={image.id} className="break-inside-avoid overflow-hidden">
                           <button
                             type="button"
                             onClick={() => onOpenLightbox(successfulTurnImages, currentIndex)}
@@ -176,18 +178,7 @@ export function ImageResults({
 
                     if (image.status === "error") {
                       return (
-                        <div
-                          key={image.id}
-                          className={cn(
-                            "break-inside-avoid overflow-hidden border border-rose-200 bg-rose-50",
-                            turn.size === "1:1" && "aspect-square",
-                            turn.size === "16:9" && "aspect-video",
-                            turn.size === "9:16" && "aspect-[9/16]",
-                            turn.size === "4:3" && "aspect-[4/3]",
-                            turn.size === "3:4" && "aspect-[3/4]",
-                            !["1:1", "16:9", "9:16", "4:3", "3:4"].includes(turn.size) && "aspect-square",
-                          )}
-                        >
+                        <div key={image.id} className={buildImageCardClassName(turn.size, "border border-rose-200 bg-rose-50")}>
                           <div className="flex h-full items-center justify-center px-6 py-8 text-center text-sm leading-6 text-rose-600">
                             {image.error || "生成失败"}
                           </div>
@@ -198,25 +189,34 @@ export function ImageResults({
                     return (
                       <div
                         key={image.id}
-                        className={cn(
-                          "break-inside-avoid overflow-hidden border border-stone-200/80 bg-stone-100/80",
-                          turn.size === "1:1" && "aspect-square",
-                          turn.size === "16:9" && "aspect-video",
-                          turn.size === "9:16" && "aspect-[9/16]",
-                          turn.size === "4:3" && "aspect-[4/3]",
-                          turn.size === "3:4" && "aspect-[3/4]",
-                          !["1:1", "16:9", "9:16", "4:3", "3:4"].includes(turn.size) && "aspect-square",
+                        className={buildImageCardClassName(
+                          turn.size,
+                          "relative overflow-hidden border border-stone-200/80 bg-[#f4efe8]",
                         )}
                       >
-                        <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center text-stone-500">
-                          <div className="rounded-full bg-white p-3 shadow-sm">
-                            {turn.status === "queued" ? (
-                              <Clock3 className="size-5" />
-                            ) : (
-                              <LoaderCircle className="size-5 animate-spin" />
-                            )}
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(120,113,108,0.12)_1px,transparent_0)] [background-size:18px_18px] opacity-80" />
+                        <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/35 via-transparent to-stone-300/10" />
+                        <div className="relative flex h-full flex-col justify-between p-4 sm:p-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="rounded-full border border-white/70 bg-white/80 px-3 py-1 text-[11px] font-medium tracking-[0.18em] text-stone-500 shadow-sm backdrop-blur-sm">
+                              {turn.status === "queued" ? "QUEUED" : "GENERATING"}
+                            </div>
+                            <div className="rounded-full bg-white/80 p-2 text-stone-600 shadow-sm backdrop-blur-sm">
+                              {turn.status === "queued" ? (
+                                <Clock3 className="size-4" />
+                              ) : (
+                                <LoaderCircle className="size-4 animate-spin" />
+                              )}
+                            </div>
                           </div>
-                          <p className="text-sm">{turn.status === "queued" ? "已加入当前对话队列..." : "正在处理图片..."}</p>
+                          <div className="space-y-2">
+                            <div className="text-base font-medium tracking-tight text-stone-800">
+                              {turn.status === "queued" ? "正在排队" : "正在生成"}
+                            </div>
+                            <div className="text-sm leading-6 text-stone-500">
+                              {turn.status === "queued" ? "前序任务完成后会自动开始处理这张图片。" : "图片生成中，完成后会自动替换成结果图。"}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     );
@@ -235,6 +235,10 @@ export function ImageResults({
       })}
     </div>
   );
+}
+
+function buildImageCardClassName(size: string, baseClassName: string) {
+  return cn(baseClassName, imageSizeAspectClassMap[size] || "aspect-square", "break-inside-avoid");
 }
 
 function getTurnStatusLabel(status: ImageTurnStatus) {

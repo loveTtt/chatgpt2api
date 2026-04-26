@@ -1,13 +1,24 @@
 "use client";
-import { ArrowUp, Check, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react";
+
+import { ArrowUp, Check, ChevronDown, ImagePlus, LoaderCircle, Sparkles, X } from "lucide-react";
+import { toast } from "sonner";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObject } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import type { ImageConversationMode } from "@/store/image-conversations";
+import { optimizeImagePrompt } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import type { ImageConversationMode } from "@/store/image-conversations";
 
 type ImageComposerProps = {
   mode: ImageConversationMode;
@@ -16,11 +27,9 @@ type ImageComposerProps = {
   imageSize: string;
   isPublic: boolean;
   availableQuota: string;
-  activeTaskCount: number;
   referenceImages: Array<{ name: string; dataUrl: string }>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
-  onModeChange: (value: ImageConversationMode) => void;
   onPromptChange: (value: string) => void;
   onImageCountChange: (value: string) => void;
   onImageSizeChange: (value: string) => void;
@@ -31,6 +40,21 @@ type ImageComposerProps = {
   onRemoveReferenceImage: (index: number) => void;
 };
 
+type OptimizePreview = {
+  originalPrompt: string;
+  optimizedPrompt: string;
+  model: string;
+};
+
+const imageSizeOptions = [
+  { value: "", label: "自动", triggerLabel: "自动" },
+  { value: "1:1", label: "方形 1:1", triggerLabel: "1:1" },
+  { value: "3:4", label: "竖版 3:4", triggerLabel: "3:4" },
+  { value: "9:16", label: "故事 9:16", triggerLabel: "9:16" },
+  { value: "4:3", label: "横屏 4:3", triggerLabel: "4:3" },
+  { value: "16:9", label: "宽屏 16:9", triggerLabel: "16:9" },
+];
+
 export function ImageComposer({
   mode,
   prompt,
@@ -38,11 +62,9 @@ export function ImageComposer({
   imageSize,
   isPublic,
   availableQuota,
-  activeTaskCount,
   referenceImages,
   textareaRef,
   fileInputRef,
-  onModeChange,
   onPromptChange,
   onImageCountChange,
   onImageSizeChange,
@@ -55,20 +77,15 @@ export function ImageComposer({
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [isSizeMenuOpen, setIsSizeMenuOpen] = useState(false);
+  const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
+  const [optimizePreview, setOptimizePreview] = useState<OptimizePreview | null>(null);
+  const [isOptimizeDialogOpen, setIsOptimizeDialogOpen] = useState(false);
   const sizeMenuRef = useRef<HTMLDivElement>(null);
   const lightboxImages = useMemo(
     () => referenceImages.map((image, index) => ({ id: `${image.name}-${index}`, src: image.dataUrl })),
     [referenceImages],
   );
-  const imageSizeOptions = [
-    { value: "", label: "未指定" },
-    { value: "1:1", label: "1:1 (正方形)" },
-    { value: "16:9", label: "16:9 (横版)" },
-    { value: "4:3", label: "4:3 (横版)" },
-    { value: "3:4", label: "3:4 (竖版)" },
-    { value: "9:16", label: "9:16 (竖版)" },
-  ];
-  const imageSizeLabel = imageSizeOptions.find((option) => option.value === imageSize)?.label || "未指定";
+  const currentImageSizeOption = imageSizeOptions.find((option) => option.value === imageSize) || imageSizeOptions[0];
 
   useEffect(() => {
     if (!isSizeMenuOpen) {
@@ -95,23 +112,98 @@ export function ImageComposer({
     void onReferenceImageChange(imageFiles);
   };
 
+  const handleOptimizePrompt = async () => {
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) {
+      toast.error("请输入提示词后再优化");
+      return;
+    }
+
+    try {
+      setIsOptimizingPrompt(true);
+      const result = await optimizeImagePrompt(normalizedPrompt);
+      setOptimizePreview({
+        originalPrompt: result.original_prompt,
+        optimizedPrompt: result.optimized_prompt,
+        model: result.model,
+      });
+      setIsOptimizeDialogOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "优化提示词失败");
+    } finally {
+      setIsOptimizingPrompt(false);
+    }
+  };
+
   return (
     <div className="shrink-0 flex justify-center">
       <div style={{ width: "min(980px, 100%)" }}>
-        {mode === "edit" && (
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(event) => {
-              void onReferenceImageChange(Array.from(event.target.files || []));
-            }}
-          />
-        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            void onReferenceImageChange(Array.from(event.target.files || []));
+          }}
+        />
 
-        {mode === "edit" && referenceImages.length > 0 ? (
+        <Dialog open={isOptimizeDialogOpen} onOpenChange={setIsOptimizeDialogOpen}>
+          <DialogContent className="w-[min(92vw,760px)] border-stone-200 bg-[#f8f3ec] p-0 shadow-[0_36px_120px_-45px_rgba(16,24,40,0.45)]">
+            <div className="grid gap-0 md:grid-cols-2">
+              <div className="border-b border-stone-200/80 p-6 md:border-r md:border-b-0">
+                <DialogHeader className="gap-3">
+                  <DialogTitle className="text-2xl tracking-tight text-stone-950">优化提示词预览</DialogTitle>
+                  <DialogDescription className="text-sm leading-6 text-stone-500">
+                    当前使用 {optimizePreview?.model || "gpt-5-3-mini"} 优化，你确认后才会替换输入框内容。
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="mt-5 rounded-[24px] border border-stone-200 bg-white/90 p-4">
+                  <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">原提示词</div>
+                  <div className="max-h-[280px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-700">
+                    {optimizePreview?.originalPrompt || "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="rounded-[24px] border border-emerald-200/80 bg-emerald-50/80 p-4">
+                  <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.18em] text-emerald-700">优化后提示词</div>
+                  <div className="max-h-[332px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-800">
+                    {optimizePreview?.optimizedPrompt || "—"}
+                  </div>
+                </div>
+                <DialogFooter className="mt-5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-full border-stone-200 bg-white text-stone-700 hover:bg-stone-50"
+                    onClick={() => setIsOptimizeDialogOpen(false)}
+                  >
+                    取消
+                  </Button>
+                  <Button
+                    type="button"
+                    className="rounded-full bg-stone-950 text-white hover:bg-stone-800"
+                    onClick={() => {
+                      if (!optimizePreview?.optimizedPrompt) {
+                        return;
+                      }
+                      onPromptChange(optimizePreview.optimizedPrompt);
+                      setIsOptimizeDialogOpen(false);
+                      toast.success("已替换为优化后的提示词");
+                      textareaRef.current?.focus();
+                    }}
+                  >
+                    替换为优化结果
+                  </Button>
+                </DialogFooter>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {referenceImages.length > 0 ? (
           <div className="mb-3 flex flex-wrap gap-2 px-1">
             {referenceImages.map((image, index) => (
               <div key={`${image.name}-${index}`} className="relative size-16">
@@ -174,33 +266,26 @@ export function ImageComposer({
                   void onSubmit();
                 }
               }}
-              className="min-h-[148px] resize-none rounded-[32px] border-0 bg-transparent px-6 pt-6 pb-20 text-[15px] leading-7 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0"
+              className="min-h-[148px] resize-none rounded-[32px] border-0 bg-transparent px-6 pt-6 pb-24 text-[15px] leading-7 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0"
             />
 
             <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white via-white/95 to-transparent px-4 pb-4 pt-6 sm:px-6">
               <div className="flex items-end justify-between gap-3">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 sm:gap-3">
-                  {mode === "edit" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-9 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
-                      onClick={onPickReferenceImage}
-                    >
-                      <ImagePlus className="size-3.5 sm:size-4" />
-                      <span className="hidden sm:inline">{referenceImages.length > 0 ? "继续添加参考图" : "上传参考图"}</span>
-                      <span className="sm:hidden">{referenceImages.length > 0 ? "继续" : "上传"}</span>
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    onClick={onPickReferenceImage}
+                  >
+                    <ImagePlus className="size-3.5 sm:size-4" />
+                    <span>{referenceImages.length > 0 ? "继续添加参考图" : "加入编辑"}</span>
+                  </Button>
+
                   <div className="rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:px-3 sm:py-2 sm:text-xs">
                     <span className="hidden xs:inline">剩余额度 </span>{availableQuota}
                   </div>
-                  {activeTaskCount > 0 && (
-                    <div className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 sm:gap-1.5 sm:px-3 sm:py-2 sm:text-xs">
-                      <LoaderCircle className="size-3 animate-spin" />
-                      {activeTaskCount}<span className="hidden sm:inline"> 个任务处理中</span>
-                    </div>
-                  )}
+
                   <div className="flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 sm:gap-2 sm:px-3 sm:py-1">
                     <span className="text-[11px] font-medium text-stone-700 sm:text-sm">张数</span>
                     <Input
@@ -213,21 +298,19 @@ export function ImageComposer({
                       className="h-7 w-[40px] border-0 bg-transparent px-0 text-center text-xs font-medium text-stone-700 shadow-none focus-visible:ring-0 sm:h-8 sm:w-[64px] sm:text-sm"
                     />
                   </div>
-                  <div
-                    ref={sizeMenuRef}
-                    className="relative flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
-                  >
-                    <span className="font-medium text-stone-700 sm:text-sm">比例</span>
+
+                  <div ref={sizeMenuRef} className="relative">
                     <button
                       type="button"
-                      className="flex h-7 w-[110px] items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 sm:h-8 sm:w-[132px]"
+                      className="flex h-9 items-center gap-2 rounded-full border border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 transition hover:border-stone-300 sm:h-10 sm:px-4 sm:text-sm"
                       onClick={() => setIsSizeMenuOpen((open) => !open)}
                     >
-                      <span className="truncate">{imageSizeLabel}</span>
+                      <AspectRatioIcon value={currentImageSizeOption.value} />
+                      <span>{currentImageSizeOption.triggerLabel}</span>
                       <ChevronDown className={cn("size-4 shrink-0 opacity-60 transition", isSizeMenuOpen && "rotate-180")} />
                     </button>
                     {isSizeMenuOpen ? (
-                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-50 w-[170px] overflow-hidden rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:w-[186px]">
+                      <div className="absolute bottom-[calc(100%+10px)] left-0 z-50 w-[196px] overflow-hidden rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)]">
                         {imageSizeOptions.map((option) => {
                           const active = option.value === imageSize;
                           return (
@@ -243,7 +326,10 @@ export function ImageComposer({
                                 setIsSizeMenuOpen(false);
                               }}
                             >
-                              <span>{option.label}</span>
+                              <span className="flex items-center gap-2.5">
+                                <AspectRatioIcon value={option.value} />
+                                <span>{option.label}</span>
+                              </span>
                               {active ? <Check className="size-4" /> : null}
                             </button>
                           );
@@ -261,19 +347,17 @@ export function ImageComposer({
                     />
                     <span>公开到作品页</span>
                   </label>
-                  {isPublic ? (
-                    <div className="rounded-full bg-stone-950 px-2 py-1 text-[10px] font-medium text-white sm:px-3 sm:py-2 sm:text-xs">
-                      链接额度不减少
-                    </div>
-                  ) : null}
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <ModeButton active={mode === "generate"} onClick={() => onModeChange("generate")}>
-                      文生图
-                    </ModeButton>
-                    <ModeButton active={mode === "edit"} onClick={() => onModeChange("edit")}>
-                      图生图
-                    </ModeButton>
-                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    onClick={() => void handleOptimizePrompt()}
+                    disabled={isOptimizingPrompt}
+                  >
+                    {isOptimizingPrompt ? <LoaderCircle className="size-3.5 animate-spin sm:size-4" /> : <Sparkles className="size-3.5 sm:size-4" />}
+                    <span>优化提示词</span>
+                  </Button>
                 </div>
 
                 <button
@@ -294,25 +378,30 @@ export function ImageComposer({
   );
 }
 
-function ModeButton({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: string;
-  onClick: () => void;
-}) {
+function AspectRatioIcon({ value }: { value: string }) {
+  if (!value) {
+    return (
+      <span className="relative inline-flex h-4 w-5 items-center justify-center text-current">
+        <span className="absolute h-[10px] w-[16px] translate-x-[2px] translate-y-[-1px] rounded-[4px] border border-current opacity-45" />
+        <span className="absolute h-[10px] w-[16px] rounded-[4px] border border-current" />
+      </span>
+    );
+  }
+
+  const boxClassName =
+    value === "1:1"
+      ? "h-[14px] w-[14px]"
+      : value === "3:4"
+        ? "h-[16px] w-[12px]"
+        : value === "9:16"
+          ? "h-[16px] w-[10px]"
+          : value === "4:3"
+            ? "h-[12px] w-[16px]"
+            : "h-[10px] w-[18px]";
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-4 sm:py-2 sm:text-sm",
-        active ? "bg-stone-950 text-white" : "bg-stone-100 text-stone-600 hover:bg-stone-200",
-      )}
-    >
-      {children}
-    </button>
+    <span className="inline-flex h-4 w-5 items-center justify-center text-current">
+      <span className={cn("rounded-[4px] border border-current", boxClassName)} />
+    </span>
   );
 }

@@ -70,18 +70,18 @@ export type SettingsConfig = {
   [key: string]: unknown;
 };
 
-export type LoginResponse = {
-  ok: boolean;
-  version: string;
-  role: AuthRole;
-  subject_id: string;
-  name: string;
-  scope?: string;
-  quota_limit?: number;
-  quota_used?: number;
-  quota_remaining?: number;
-  expires_at?: string | null;
+export type PromptOptimizeResponse = {
+  original_prompt: string;
+  optimized_prompt: string;
+  model: string;
 };
+
+export async function optimizeImagePrompt(prompt: string) {
+  return httpRequest<PromptOptimizeResponse>("/api/image/prompts/optimize", {
+    method: "POST",
+    body: { prompt },
+  });
+}
 
 export type UserKey = {
   id: string;

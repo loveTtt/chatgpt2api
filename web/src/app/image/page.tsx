@@ -21,7 +21,6 @@ import { setStoredAuthSession, type StoredAuthSession } from "@/store/auth";
 import {
   clearImageConversations,
   deleteImageConversation,
-  getImageConversationStats,
   listImageConversations,
   saveImageConversations,
   type ImageConversation,
@@ -202,14 +201,6 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
   );
-  const activeTaskCount = useMemo(
-    () =>
-      conversations.reduce((sum, conversation) => {
-        const stats = getImageConversationStats(conversation);
-        return sum + stats.queued + stats.running;
-      }, 0),
-    [conversations],
-  );
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -340,6 +331,14 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     }
     window.localStorage.removeItem(IMAGE_SIZE_STORAGE_KEY);
   }, [imageSize]);
+
+  useEffect(() => {
+    if (referenceImages.length > 0) {
+      setImageMode("edit");
+      return;
+    }
+    setImageMode("generate");
+  }, [referenceImages.length]);
 
   useEffect(() => {
     if (selectedConversationId && !conversations.some((conversation) => conversation.id === selectedConversationId)) {
@@ -895,11 +894,9 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             imageSize={imageSize}
             isPublic={isPublic}
             availableQuota={availableQuota}
-            activeTaskCount={activeTaskCount}
             referenceImages={referenceImages}
             textareaRef={textareaRef}
             fileInputRef={fileInputRef}
-            onModeChange={setImageMode}
             onPromptChange={setImagePrompt}
             onImageCountChange={setImageCount}
             onImageSizeChange={setImageSize}
