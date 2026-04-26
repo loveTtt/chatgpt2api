@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { BookmarkPlus, ChevronLeft, ChevronRight, Copy, Download, Share2, X } from "lucide-react";
+import { BookmarkPlus, ChevronLeft, ChevronRight, Copy, Download, Share2, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,8 @@ type ImageLightboxProps = {
   onIndexChange: (index: number) => void;
   variant?: "overlay" | "details";
   hidePromptOverlay?: boolean;
+  canDelete?: boolean;
+  onDelete?: (image: LightboxImage) => Promise<void>;
 };
 
 function formatDetailTime(value?: string) {
@@ -87,12 +89,15 @@ export function ImageLightbox({
   onIndexChange,
   variant = "overlay",
   hidePromptOverlay = false,
+  canDelete = false,
+  onDelete,
 }: ImageLightboxProps) {
   const current = images[currentIndex];
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < images.length - 1;
   const [isQuickPromptDialogOpen, setIsQuickPromptDialogOpen] = useState(false);
   const [quickPromptName, setQuickPromptName] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!isQuickPromptDialogOpen) {
@@ -172,6 +177,22 @@ export function ImageLightbox({
       toast.error(error instanceof Error ? error.message : "加入快捷提示词失败");
     }
   }, [current?.prompt, quickPromptName]);
+
+  const handleDelete = useCallback(async () => {
+    if (!current || !canDelete || !onDelete || isDeleting) {
+      return;
+    }
+    const confirmed = window.confirm(`确认删除作品「${String(current.title || "").trim() || "未命名作品"}」吗？`);
+    if (!confirmed) {
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await onDelete(current);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [canDelete, current, isDeleting, onDelete]);
 
   if (!current) return null;
 
@@ -311,6 +332,17 @@ export function ImageLightbox({
                         >
                           <Share2 className="size-4" />
                           分享作品
+                        </button>
+                      ) : null}
+                      {canDelete && onDelete ? (
+                        <button
+                          type="button"
+                          onClick={() => void handleDelete()}
+                          disabled={isDeleting}
+                          className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-red-200 bg-red-50 px-5 text-sm font-medium text-red-700 transition hover:border-red-300 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Trash2 className="size-4" />
+                          {isDeleting ? "删除中..." : "删除作品"}
                         </button>
                       ) : null}
                     </div>

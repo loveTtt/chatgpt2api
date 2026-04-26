@@ -7,7 +7,8 @@ import { toast } from "sonner";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
-import { fetchPublicWorkById, fetchPublicWorks, type PublicWork } from "@/lib/api";
+import { deletePublicWork, fetchPublicWorkById, fetchPublicWorks, type PublicWork } from "@/lib/api";
+import { getStoredAuthSession } from "@/store/auth";
 
 function formatWorkTime(value: string) {
   const date = new Date(value);
@@ -51,6 +52,7 @@ function WorksPageContent() {
   const [isResolvingSharedWork, setIsResolvingSharedWork] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const buildWorksUrl = useCallback(
     (workId?: string) => {
@@ -111,6 +113,23 @@ function WorksPageContent() {
       setIsLoading(false);
     }
   }, [viewWorkId]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSession = async () => {
+      const session = await getStoredAuthSession();
+      if (!active) {
+        return;
+      }
+      setIsAdmin(session?.role === "admin");
+    };
+
+    void loadSession();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     void loadWorks();
@@ -206,6 +225,23 @@ function WorksPageContent() {
     [syncViewParam, works],
   );
 
+  const handleDeleteWork = useCallback(
+    async (image: { id: string }) => {
+      await deletePublicWork(image.id);
+      const nextWorks = works.filter((work) => work.id !== image.id);
+      setWorks(nextWorks);
+      setLightboxOpen(false);
+      syncViewParam();
+      if (nextWorks.length === 0) {
+        setLightboxIndex(0);
+      } else if (lightboxIndex >= nextWorks.length) {
+        setLightboxIndex(nextWorks.length - 1);
+      }
+      toast.success("作品已删除");
+    },
+    [lightboxIndex, syncViewParam, works],
+  );
+
   const isBusy = isLoading || (isResolvingSharedWork && works.length === 0);
 
   return (
@@ -288,6 +324,8 @@ function WorksPageContent() {
         onOpenChange={handleLightboxOpenChange}
         onIndexChange={handleLightboxIndexChange}
         variant="details"
+        canDelete={isAdmin}
+        onDelete={handleDeleteWork}
       />
     </>
   );

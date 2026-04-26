@@ -239,6 +239,12 @@ export async function fetchPublicWorkById(workId: string, options: { redirectOnU
   });
 }
 
+export async function deletePublicWork(workId: string) {
+  return httpRequest<{ ok: boolean }>(`/api/public-works/${workId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function fetchSettingsConfig() {
   return httpRequest<{ config: SettingsConfig }>("/api/settings");
 }
