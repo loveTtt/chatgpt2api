@@ -49,22 +49,46 @@ class ResponseCreateRequest(BaseModel):
     stream: bool | None = None
 
 
-def _ensure_image_link_quota(identity: dict[str, object], count: int) -> None:
+def _ensure_image_link_quota(identity: dict[str, object], count: int, *, is_public: bool = False) -> dict[str, int]:
     try:
-        auth_service.ensure_image_link_quota(identity, count)
+        return auth_service.allocate_image_link_usage(identity, count, is_public=is_public)
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail={"error": str(exc)}) from exc
 
 
-def _consume_image_link_quota(identity: dict[str, object], count: int, result: object) -> None:
-    if not is_image_link_identity(identity) or not isinstance(result, dict):
+def _apply_public_work_titles(result: object, created_items: list[dict[str, object]]) -> None:
+    if not isinstance(result, dict):
         return
     data = result.get("data")
-    success_count = len(data) if isinstance(data, list) else count
-    if success_count > 0:
-        auth_service.consume_image_link_quota(identity, success_count)
+    if not isinstance(data, list):
+        return
+    for index, item in enumerate(data):
+        if not isinstance(item, dict):
+            continue
+        if index < len(created_items):
+            item["title"] = created_items[index].get("title") or "未命名作品"
+
+
+def _count_success_images(result: object) -> int:
+    if not isinstance(result, dict):
+        return 0
+    data = result.get("data")
+    if not isinstance(data, list):
+        return 0
+    return sum(1 for item in data if isinstance(item, dict) and item.get("b64_json"))
+
+
+def _consume_image_link_quota(identity: dict[str, object], result: object, usage_plan: dict[str, int]) -> None:
+    if not is_image_link_identity(identity):
+        return
+    success_count = _count_success_images(result)
+    if success_count <= 0:
+        return
+    public_free_count = min(success_count, max(0, int(usage_plan.get("public_free_count", 0))))
+    quota_count = min(success_count - public_free_count, max(0, int(usage_plan.get("quota_count", 0))))
+    auth_service.consume_image_link_usage(identity, public_free_count=public_free_count, quota_count=quota_count)
 
 
 def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
@@ -86,8 +110,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             authorization: str | None = Header(default=None),
     ):
         identity = require_image_access(authorization)
-        if not body.is_public:
-            _ensure_image_link_quota(identity, body.n)
+        usage_plan = _ensure_image_link_quota(identity, body.n, is_public=body.is_public)
         base_url = resolve_image_base_url(request)
         if body.stream:
             if is_image_link_identity(identity):
@@ -109,7 +132,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 chatgpt_service.generate_with_pool, body.prompt, body.model, body.n, body.size, body.response_format, base_url
             )
             if body.is_public:
-                await run_in_threadpool(
+                created_items = await run_in_threadpool(
                     public_work_service.publish,
                     result=result,
                     prompt=body.prompt,
@@ -117,8 +140,8 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                     identity=identity,
                     base_url=base_url,
                 )
-            else:
-                _consume_image_link_quota(identity, body.n, result)
+                _apply_public_work_titles(result, created_items)
+            _consume_image_link_quota(identity, result, usage_plan)
             return result
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)
@@ -140,8 +163,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
         identity = require_image_access(authorization)
         if n < 1 or n > 4:
             raise HTTPException(status_code=400, detail={"error": "n must be between 1 and 4"})
-        if not is_public:
-            _ensure_image_link_quota(identity, n)
+        usage_plan = _ensure_image_link_quota(identity, n, is_public=is_public)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
@@ -166,7 +188,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 chatgpt_service.edit_with_pool, prompt, images, model, n, size, response_format, base_url
             )
             if is_public:
-                await run_in_threadpool(
+                created_items = await run_in_threadpool(
                     public_work_service.publish,
                     result=result,
                     prompt=prompt,
@@ -174,8 +196,8 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                     identity=identity,
                     base_url=base_url,
                 )
-            else:
-                _consume_image_link_quota(identity, n, result)
+                _apply_public_work_titles(result, created_items)
+            _consume_image_link_quota(identity, result, usage_plan)
             return result
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)

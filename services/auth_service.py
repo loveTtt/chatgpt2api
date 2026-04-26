@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Literal
 
@@ -12,10 +12,16 @@ from services.config import config
 from services.storage.base import StorageBackend
 
 AuthRole = Literal["admin", "user"]
+ImageLinkQuotaMode = Literal["one_time", "daily"]
+DEFAULT_PUBLIC_FREE_LIMIT = 20
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
+
+
+def _current_reset_date() -> str:
+    return datetime.now(UTC).date().isoformat()
 
 
 def _hash_key(value: str) -> str:
@@ -45,6 +51,10 @@ class AuthService:
         return default
 
     @staticmethod
+    def _normalize_quota_mode(value: object) -> ImageLinkQuotaMode:
+        return "daily" if str(value or "").strip().lower() == "daily" else "one_time"
+
+    @staticmethod
     def _is_expired(value: object) -> bool:
         expires_at = str(value or "").strip()
         if not expires_at:
@@ -54,8 +64,39 @@ class AuthService:
         except ValueError:
             return False
         if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        return expires <= datetime.now(timezone.utc)
+            expires = expires.replace(tzinfo=UTC)
+        return expires <= datetime.now(UTC)
+
+    def _normalize_image_link_item(self, item: dict[str, object]) -> tuple[dict[str, object], bool]:
+        changed = False
+        quota_limit = max(0, self._safe_int(item.get("quota_limit")))
+        quota_used = min(quota_limit, max(0, self._safe_int(item.get("quota_used"))))
+        quota_mode = self._normalize_quota_mode(item.get("quota_mode"))
+        public_free_limit = max(0, self._safe_int(item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT))
+        public_free_used = min(public_free_limit, max(0, self._safe_int(item.get("public_free_used"))))
+        quota_reset_date = self._clean(item.get("quota_reset_date")) or _current_reset_date()
+        if quota_mode == "daily" and quota_reset_date != _current_reset_date():
+            quota_used = 0
+            public_free_used = 0
+            quota_reset_date = _current_reset_date()
+            changed = True
+        normalized = dict(item)
+        normalized.update(
+            {
+                "quota_limit": quota_limit,
+                "quota_used": quota_used,
+                "quota_mode": quota_mode,
+                "public_free_limit": public_free_limit,
+                "public_free_used": public_free_used,
+                "quota_reset_date": quota_reset_date,
+            }
+        )
+        if any(
+            item.get(key) != normalized.get(key)
+            for key in ("quota_limit", "quota_used", "quota_mode", "public_free_limit", "public_free_used", "quota_reset_date")
+        ):
+            changed = True
+        return normalized, changed
 
     def _normalize_item(self, raw: object) -> dict[str, object] | None:
         if not isinstance(raw, dict):
@@ -83,17 +124,14 @@ class AuthService:
             "last_used_at": last_used_at,
         }
         if scope:
-            quota_limit = max(0, self._safe_int(raw.get("quota_limit")))
-            quota_used = min(quota_limit, max(0, self._safe_int(raw.get("quota_used"))))
             item.update(
                 {
                     "scope": scope,
-                    "quota_limit": quota_limit,
-                    "quota_used": quota_used,
                     "expires_at": self._clean(raw.get("expires_at")) or None,
                     "created_by": self._clean(raw.get("created_by")) or None,
                 }
             )
+            item, _ = self._normalize_image_link_item(item | raw)
             raw_key = self._clean(raw.get("key"))
             if raw_key:
                 item["key"] = raw_key
@@ -106,10 +144,17 @@ class AuthService:
             return []
         if not isinstance(items, list):
             return []
-        return [normalized for item in items if (normalized := self._normalize_item(item)) is not None]
+        normalized_items = [normalized for item in items if (normalized := self._normalize_item(item)) is not None]
+        return normalized_items
 
     def _save(self) -> None:
         self.storage.save_auth_keys(self._items)
+
+    def _ensure_daily_reset(self, item: dict[str, object]) -> tuple[dict[str, object], bool]:
+        if item.get("scope") != "image_link":
+            return item, False
+        normalized_item, changed = self._normalize_image_link_item(item)
+        return normalized_item, changed
 
     @staticmethod
     def _public_item(item: dict[str, object]) -> dict[str, object]:
@@ -124,12 +169,19 @@ class AuthService:
         if item.get("scope") == "image_link":
             quota_limit = AuthService._safe_int(item.get("quota_limit"))
             quota_used = AuthService._safe_int(item.get("quota_used"))
+            public_free_limit = AuthService._safe_int(item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT)
+            public_free_used = AuthService._safe_int(item.get("public_free_used"))
             result.update(
                 {
                     "scope": "image_link",
                     "quota_limit": quota_limit,
                     "quota_used": quota_used,
                     "quota_remaining": max(0, quota_limit - quota_used),
+                    "quota_mode": AuthService._normalize_quota_mode(item.get("quota_mode")),
+                    "public_free_limit": public_free_limit,
+                    "public_free_used": public_free_used,
+                    "public_free_remaining": max(0, public_free_limit - public_free_used),
+                    "quota_reset_date": item.get("quota_reset_date"),
                     "expires_at": item.get("expires_at"),
                     "created_by": item.get("created_by"),
                     "key": item.get("key"),
@@ -139,9 +191,18 @@ class AuthService:
 
     def list_keys(self, role: AuthRole | None = None, *, scope: str | None = None) -> list[dict[str, object]]:
         with self._lock:
+            changed = False
+            next_items: list[dict[str, object]] = []
+            for item in self._items:
+                normalized_item, item_changed = self._ensure_daily_reset(item)
+                next_items.append(normalized_item)
+                changed = changed or item_changed
+            if changed:
+                self._items = next_items
+                self._save()
             items = [
                 item
-                for item in self._items
+                for item in next_items
                 if (role is None or item.get("role") == role) and (scope is None or item.get("scope", "") == scope)
             ]
             return [self._public_item(item) for item in items]
@@ -170,10 +231,15 @@ class AuthService:
         quota_limit: int,
         expires_at: str | None = None,
         created_by: str | None = None,
+        quota_mode: ImageLinkQuotaMode = "one_time",
+        public_free_limit: int = DEFAULT_PUBLIC_FREE_LIMIT,
     ) -> tuple[dict[str, object], str]:
         normalized_quota = int(quota_limit)
         if normalized_quota < 1:
             raise ValueError("quota_limit must be greater than 0")
+        normalized_public_free_limit = int(public_free_limit)
+        if normalized_public_free_limit < 0:
+            raise ValueError("public_free_limit must be greater than or equal to 0")
         normalized_name = self._clean(name) or "授权画图链接"
         raw_key = f"sk-img-{secrets.token_urlsafe(24)}"
         item = {
@@ -186,6 +252,10 @@ class AuthService:
             "enabled": True,
             "quota_limit": normalized_quota,
             "quota_used": 0,
+            "quota_mode": self._normalize_quota_mode(quota_mode),
+            "public_free_limit": normalized_public_free_limit,
+            "public_free_used": 0,
+            "quota_reset_date": _current_reset_date(),
             "expires_at": self._clean(expires_at) or None,
             "created_by": self._clean(created_by) or None,
             "created_at": _now_iso(),
@@ -215,22 +285,62 @@ class AuthService:
                     return None
                 if scope is not None and item.get("scope", "") != scope:
                     return None
-                next_item = dict(item)
+                next_item, changed = self._ensure_daily_reset(item)
                 if "name" in updates and updates.get("name") is not None:
                     next_item["name"] = self._clean(updates.get("name")) or next_item.get("name") or "普通用户"
+                    changed = True
                 if "enabled" in updates and updates.get("enabled") is not None:
                     next_item["enabled"] = bool(updates.get("enabled"))
+                    changed = True
                 if next_item.get("scope") == "image_link":
                     if "expires_at" in updates:
                         next_item["expires_at"] = self._clean(updates.get("expires_at")) or None
+                        changed = True
                     if "quota_limit" in updates and updates.get("quota_limit") is not None:
                         next_limit = self._safe_int(updates.get("quota_limit"))
                         if next_limit < 1:
                             raise ValueError("quota_limit must be greater than 0")
                         next_item["quota_limit"] = next_limit
                         next_item["quota_used"] = min(self._safe_int(next_item.get("quota_used")), next_limit)
+                        changed = True
+                    if "quota_used" in updates and updates.get("quota_used") is not None:
+                        next_used = self._safe_int(updates.get("quota_used"))
+                        if next_used < 0:
+                            raise ValueError("quota_used must be greater than or equal to 0")
+                        next_item["quota_used"] = min(self._safe_int(next_item.get("quota_limit")), next_used)
+                        changed = True
+                    if "quota_mode" in updates and updates.get("quota_mode") is not None:
+                        next_item["quota_mode"] = self._normalize_quota_mode(updates.get("quota_mode"))
+                        next_item["quota_reset_date"] = _current_reset_date()
+                        if next_item["quota_mode"] == "daily":
+                            next_item["quota_used"] = 0
+                            next_item["public_free_used"] = 0
+                        changed = True
+                    if "public_free_limit" in updates and updates.get("public_free_limit") is not None:
+                        next_public_free_limit = self._safe_int(updates.get("public_free_limit"))
+                        if next_public_free_limit < 0:
+                            raise ValueError("public_free_limit must be greater than or equal to 0")
+                        next_item["public_free_limit"] = next_public_free_limit
+                        next_item["public_free_used"] = min(
+                            self._safe_int(next_item.get("public_free_used")),
+                            next_public_free_limit,
+                        )
+                        changed = True
+                    if "public_free_used" in updates and updates.get("public_free_used") is not None:
+                        next_public_free_used = self._safe_int(updates.get("public_free_used"))
+                        if next_public_free_used < 0:
+                            raise ValueError("public_free_used must be greater than or equal to 0")
+                        next_item["public_free_used"] = min(
+                            self._safe_int(next_item.get("public_free_limit")),
+                            next_public_free_used,
+                        )
+                        changed = True
+                    if "quota_reset_date" in updates and updates.get("quota_reset_date") is not None:
+                        next_item["quota_reset_date"] = self._clean(updates.get("quota_reset_date")) or _current_reset_date()
+                        changed = True
                 self._items[index] = next_item
-                self._save()
+                if changed:
+                    self._save()
                 return self._public_item(next_item)
         return None
 
@@ -268,8 +378,8 @@ class AuthService:
                     continue
                 if item.get("scope") == "image_link" and self._is_expired(item.get("expires_at")):
                     continue
-                next_item = dict(item)
-                now = datetime.now(timezone.utc)
+                next_item, _ = self._ensure_daily_reset(item)
+                now = datetime.now(UTC)
                 next_item["last_used_at"] = now.isoformat()
                 self._items[index] = next_item
                 item_id = self._clean(next_item.get("id"))
@@ -290,21 +400,25 @@ class AuthService:
         if requested_count < 1:
             raise ValueError("count must be greater than 0")
         with self._lock:
-            for item in self._items:
+            for index, item in enumerate(self._items):
                 if item.get("id") != item_id or item.get("scope") != "image_link":
                     continue
-                if not bool(item.get("enabled", True)) or self._is_expired(item.get("expires_at")):
+                next_item, changed = self._ensure_daily_reset(item)
+                self._items[index] = next_item
+                if changed:
+                    self._save()
+                if not bool(next_item.get("enabled", True)) or self._is_expired(next_item.get("expires_at")):
                     raise PermissionError("image link is unavailable")
-                quota_limit = self._safe_int(item.get("quota_limit"))
-                quota_used = self._safe_int(item.get("quota_used"))
+                quota_limit = self._safe_int(next_item.get("quota_limit"))
+                quota_used = self._safe_int(next_item.get("quota_used"))
                 if quota_used + requested_count > quota_limit:
                     raise RuntimeError("image link quota exceeded")
                 return
         raise PermissionError("image link is unavailable")
 
-    def consume_image_link_quota(self, identity: dict[str, object], count: int) -> dict[str, object] | None:
+    def allocate_image_link_usage(self, identity: dict[str, object], count: int, *, is_public: bool) -> dict[str, object]:
         if identity.get("scope") != "image_link":
-            return None
+            return {"public_free_count": 0, "quota_count": 0}
         item_id = self._clean(identity.get("id"))
         requested_count = int(count)
         if requested_count < 1:
@@ -313,14 +427,60 @@ class AuthService:
             for index, item in enumerate(self._items):
                 if item.get("id") != item_id or item.get("scope") != "image_link":
                     continue
-                quota_limit = self._safe_int(item.get("quota_limit"))
-                quota_used = self._safe_int(item.get("quota_used"))
-                next_item = dict(item)
-                next_item["quota_used"] = min(quota_limit, quota_used + requested_count)
+                next_item, changed = self._ensure_daily_reset(item)
+                if not bool(next_item.get("enabled", True)) or self._is_expired(next_item.get("expires_at")):
+                    raise PermissionError("image link is unavailable")
+                public_free_count = 0
+                quota_count = requested_count
+                if is_public:
+                    public_free_limit = self._safe_int(next_item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT)
+                    public_free_used = self._safe_int(next_item.get("public_free_used"))
+                    public_free_remaining = max(0, public_free_limit - public_free_used)
+                    public_free_count = min(requested_count, public_free_remaining)
+                    quota_count = requested_count - public_free_count
+                quota_limit = self._safe_int(next_item.get("quota_limit"))
+                quota_used = self._safe_int(next_item.get("quota_used"))
+                if quota_used + quota_count > quota_limit:
+                    raise RuntimeError("image link quota exceeded")
+                self._items[index] = next_item
+                if changed:
+                    self._save()
+                return {"public_free_count": public_free_count, "quota_count": quota_count}
+        raise PermissionError("image link is unavailable")
+
+    def consume_image_link_usage(
+        self,
+        identity: dict[str, object],
+        *,
+        public_free_count: int = 0,
+        quota_count: int = 0,
+    ) -> dict[str, object] | None:
+        if identity.get("scope") != "image_link":
+            return None
+        item_id = self._clean(identity.get("id"))
+        normalized_public_free_count = max(0, int(public_free_count))
+        normalized_quota_count = max(0, int(quota_count))
+        with self._lock:
+            for index, item in enumerate(self._items):
+                if item.get("id") != item_id or item.get("scope") != "image_link":
+                    continue
+                next_item, _ = self._ensure_daily_reset(item)
+                quota_limit = self._safe_int(next_item.get("quota_limit"))
+                quota_used = self._safe_int(next_item.get("quota_used"))
+                public_free_limit = self._safe_int(next_item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT)
+                public_free_used = self._safe_int(next_item.get("public_free_used"))
+                next_item["quota_used"] = min(quota_limit, quota_used + normalized_quota_count)
+                next_item["public_free_used"] = min(public_free_limit, public_free_used + normalized_public_free_count)
                 self._items[index] = next_item
                 self._save()
                 return self._public_item(next_item)
         return None
+
+    def consume_image_link_quota(self, identity: dict[str, object], count: int) -> dict[str, object] | None:
+        normalized_count = int(count)
+        if normalized_count < 1:
+            raise ValueError("count must be greater than 0")
+        return self.consume_image_link_usage(identity, quota_count=normalized_count)
 
 
 auth_service = AuthService(config.get_storage_backend())

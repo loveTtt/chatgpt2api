@@ -30,7 +30,18 @@ def create_router(app_version: str) -> APIRouter:
             "subject_id": identity.get("id"),
             "name": identity.get("name"),
         }
-        for key in ("scope", "quota_limit", "quota_used", "quota_remaining", "expires_at"):
+        for key in (
+            "scope",
+            "quota_limit",
+            "quota_used",
+            "quota_remaining",
+            "quota_mode",
+            "public_free_limit",
+            "public_free_used",
+            "public_free_remaining",
+            "quota_reset_date",
+            "expires_at",
+        ):
             if key in identity:
                 response[key] = identity.get(key)
         return response
