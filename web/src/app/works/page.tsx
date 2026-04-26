@@ -52,6 +52,7 @@ function WorksPageContent() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [canAccessPublicList, setCanAccessPublicList] = useState(false);
 
   const buildWorksUrl = useCallback(
     (workId?: string) => {
@@ -100,6 +101,11 @@ function WorksPageContent() {
         return;
       }
 
+      if (!canAccessPublicList) {
+        setWorks([]);
+        return;
+      }
+
       const data = await fetchPublicWorks(60);
       setWorks(data.items);
     } catch (error) {
@@ -107,12 +113,13 @@ function WorksPageContent() {
       toast.error(message);
       if (viewWorkId) {
         setWorks([]);
-        syncViewParam();
+        return;
       }
+      setWorks([]);
     } finally {
       setIsLoading(false);
     }
-  }, [syncViewParam, viewWorkId]);
+  }, [canAccessPublicList, viewWorkId]);
 
   useEffect(() => {
     let active = true;
@@ -122,7 +129,9 @@ function WorksPageContent() {
       if (!active) {
         return;
       }
+      const isAuthenticated = Boolean(session?.key && session?.role);
       setIsAdmin(session?.role === "admin");
+      setCanAccessPublicList(isAuthenticated);
     };
 
     void loadSession();
@@ -153,9 +162,7 @@ function WorksPageContent() {
     }
 
     setLightboxOpen(false);
-    syncViewParam();
-  }, [isLoading, syncViewParam, viewWorkId, works]);
-
+  }, [isLoading, viewWorkId, works]);
 
   const handleOpenWork = useCallback(
     (index: number) => {
@@ -174,7 +181,7 @@ function WorksPageContent() {
     (open: boolean) => {
       setLightboxOpen(open);
       if (!open) {
-        if (!viewWorkId) {
+        if (viewWorkId && canAccessPublicList) {
           syncViewParam();
         }
         return;
@@ -184,7 +191,7 @@ function WorksPageContent() {
         syncViewParam(targetWork.id);
       }
     },
-    [lightboxIndex, syncViewParam, viewWorkId, works],
+    [canAccessPublicList, lightboxIndex, syncViewParam, viewWorkId, works],
   );
 
   const handleLightboxIndexChange = useCallback(
@@ -237,7 +244,7 @@ function WorksPageContent() {
             variant="outline"
             className="w-fit rounded-full border-stone-200 bg-white text-stone-700 shadow-none hover:bg-stone-50"
             onClick={() => void loadWorks()}
-            disabled={isBusy}
+            disabled={isBusy || (!viewWorkId && !canAccessPublicList)}
           >
             <RefreshCw className={isBusy ? "size-4 animate-spin" : "size-4"} />
             刷新
@@ -252,7 +259,9 @@ function WorksPageContent() {
           <div className="flex min-h-[42vh] items-center justify-center text-center">
             <div>
               <div className="mx-auto mb-5 h-px w-20 bg-stone-200" />
-              <p className="text-sm text-stone-500">还没有公开作品。</p>
+              <p className="text-sm text-stone-500">
+                {viewWorkId ? "分享作品不存在或已删除。" : canAccessPublicList ? "还没有公开作品。" : "请使用分享链接查看单个作品。"}
+              </p>
             </div>
           </div>
         ) : viewWorkId ? (
