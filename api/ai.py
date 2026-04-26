@@ -28,6 +28,7 @@ class ImageGenerationRequest(BaseModel):
     history_disabled: bool = True
     stream: bool | None = None
     is_public: bool = False
+    is_prompt_public: bool = False
 
 
 class ChatCompletionRequest(BaseModel):
@@ -49,9 +50,9 @@ class ResponseCreateRequest(BaseModel):
     stream: bool | None = None
 
 
-def _ensure_image_link_quota(identity: dict[str, object], count: int, *, is_public: bool = False) -> dict[str, int]:
+def _ensure_image_link_quota(identity: dict[str, object], count: int, *, use_public_free: bool = False) -> dict[str, int]:
     try:
-        return auth_service.allocate_image_link_usage(identity, count, is_public=is_public)
+        return auth_service.allocate_image_link_usage(identity, count, use_public_free=use_public_free)
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
     except PermissionError as exc:
@@ -110,7 +111,8 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             authorization: str | None = Header(default=None),
     ):
         identity = require_image_access(authorization)
-        usage_plan = _ensure_image_link_quota(identity, body.n, is_public=body.is_public)
+        use_public_free = body.is_public and body.is_prompt_public
+        usage_plan = _ensure_image_link_quota(identity, body.n, use_public_free=use_public_free)
         base_url = resolve_image_base_url(request)
         if body.stream:
             if is_image_link_identity(identity):
@@ -138,6 +140,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                     prompt=body.prompt,
                     source="generation",
                     identity=identity,
+                    is_prompt_public=body.is_prompt_public,
                     base_url=base_url,
                 )
                 _apply_public_work_titles(result, created_items)
@@ -159,11 +162,13 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
             response_format: str = Form(default="b64_json"),
             stream: bool | None = Form(default=None),
             is_public: bool = Form(default=False),
+            is_prompt_public: bool = Form(default=False),
     ):
         identity = require_image_access(authorization)
         if n < 1 or n > 4:
             raise HTTPException(status_code=400, detail={"error": "n must be between 1 and 4"})
-        usage_plan = _ensure_image_link_quota(identity, n, is_public=is_public)
+        use_public_free = is_public and is_prompt_public
+        usage_plan = _ensure_image_link_quota(identity, n, use_public_free=use_public_free)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
@@ -194,6 +199,7 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                     prompt=prompt,
                     source="edit",
                     identity=identity,
+                    is_prompt_public=is_prompt_public,
                     base_url=base_url,
                 )
                 _apply_public_work_titles(result, created_items)

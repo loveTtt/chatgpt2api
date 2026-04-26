@@ -416,7 +416,7 @@ class AuthService:
                 return
         raise PermissionError("image link is unavailable")
 
-    def allocate_image_link_usage(self, identity: dict[str, object], count: int, *, is_public: bool) -> dict[str, object]:
+    def allocate_image_link_usage(self, identity: dict[str, object], count: int, *, use_public_free: bool) -> dict[str, object]:
         if identity.get("scope") != "image_link":
             return {"public_free_count": 0, "quota_count": 0}
         item_id = self._clean(identity.get("id"))
@@ -432,7 +432,7 @@ class AuthService:
                     raise PermissionError("image link is unavailable")
                 public_free_count = 0
                 quota_count = requested_count
-                if is_public:
+                if use_public_free:
                     public_free_limit = self._safe_int(next_item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT)
                     public_free_used = self._safe_int(next_item.get("public_free_used"))
                     public_free_remaining = max(0, public_free_limit - public_free_used)

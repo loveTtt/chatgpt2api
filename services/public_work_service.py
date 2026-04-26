@@ -45,16 +45,18 @@ class PublicWorkService:
 
     @staticmethod
     def _public_item(item: dict[str, Any]) -> dict[str, Any]:
+        is_prompt_public = item.get("is_prompt_public") is not False
         return {
             "id": item.get("id"),
             "title": item.get("title") or "",
-            "prompt": item.get("prompt") or "",
-            "revised_prompt": item.get("revised_prompt") or "",
+            "prompt": (item.get("prompt") or "") if is_prompt_public else "",
+            "revised_prompt": (item.get("revised_prompt") or "") if is_prompt_public else "",
             "image_url": item.get("image_url") or "",
             "width": int(item.get("width") or 0),
             "height": int(item.get("height") or 0),
             "file_size_bytes": int(item.get("file_size_bytes") or 0),
             "created_at": item.get("created_at") or "",
+            "is_prompt_public": is_prompt_public,
         }
 
     @staticmethod
@@ -153,6 +155,7 @@ class PublicWorkService:
         prompt: str,
         source: PublicWorkSource,
         identity: dict[str, object],
+        is_prompt_public: bool,
         base_url: str | None = None,
     ) -> list[dict[str, Any]]:
         if not isinstance(result, dict):
@@ -163,6 +166,7 @@ class PublicWorkService:
 
         created_items: list[dict[str, Any]] = []
         created_at = _now_iso()
+        public_prompt = prompt if is_prompt_public else ""
         for item in data:
             if not isinstance(item, dict):
                 continue
@@ -170,13 +174,14 @@ class PublicWorkService:
             if not image_data:
                 continue
             width, height = self._image_size(image_data)
-            revised_prompt = _clean(item.get("revised_prompt"))
+            revised_prompt = _clean(item.get("revised_prompt")) if is_prompt_public else ""
             created_items.append(
                 {
                     "id": uuid.uuid4().hex,
-                    "title": self._generate_title(prompt, revised_prompt),
-                    "prompt": prompt,
+                    "title": self._generate_title(prompt, _clean(item.get("revised_prompt"))),
+                    "prompt": public_prompt,
                     "revised_prompt": revised_prompt,
+                    "is_prompt_public": bool(is_prompt_public),
                     "image_url": self._save_image(image_data, base_url),
                     "width": width,
                     "height": height,
