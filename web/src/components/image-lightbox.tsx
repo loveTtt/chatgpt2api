@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ChevronLeft, ChevronRight, Download, Share2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Download, Share2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
@@ -112,6 +112,20 @@ export function ImageLightbox({
     }
   }, [current]);
 
+  const handleCopyPrompt = useCallback(async () => {
+    const prompt = String(current?.prompt || "").trim();
+    if (!prompt) {
+      toast.error("当前作品没有可复制的提示词");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      toast.success("提示词已复制到剪贴板");
+    } catch {
+      toast.error("复制失败，请手动复制");
+    }
+  }, [current]);
+
   if (!current) return null;
 
   const sizeLabel = current.width && current.height ? `${current.width} × ${current.height}` : "—";
@@ -210,21 +224,21 @@ export function ImageLightbox({
                 <section className="space-y-4 rounded-[28px] border border-stone-200/80 bg-white/90 p-5 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
                   <div className="flex items-center justify-between gap-3">
                     <h3 className="text-2xl font-semibold tracking-tight text-stone-950">提示词</h3>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyPrompt()}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-4 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+                    >
+                      <Copy className="size-4" />
+                      复制提示词
+                    </button>
                   </div>
                   <div className="space-y-2">
-                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">主提示词</div>
+                    <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">生成提示词</div>
                     <div className="max-h-[240px] overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-stone-700">
                       {current.prompt || "无提示词"}
                     </div>
                   </div>
-                  {current.revisedPrompt ? (
-                    <div className="space-y-2 border-t border-stone-200 pt-4">
-                      <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-stone-400">修订提示词</div>
-                      <div className="max-h-[180px] overflow-y-auto whitespace-pre-wrap break-words text-xs leading-6 text-stone-500">
-                        {current.revisedPrompt}
-                      </div>
-                    </div>
-                  ) : null}
                 </section>
               </aside>
             </div>

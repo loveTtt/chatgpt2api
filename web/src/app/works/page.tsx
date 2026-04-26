@@ -79,7 +79,6 @@ function WorksPageContent() {
         id: work.id,
         src: buildWorkUrl(work.image_url),
         prompt: work.prompt,
-        revisedPrompt: work.revised_prompt,
         width: work.width,
         height: work.height,
         createdAt: work.created_at,
