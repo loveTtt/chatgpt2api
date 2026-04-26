@@ -76,6 +76,19 @@ class PublicWorkService:
         public_items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return public_items[: max(1, min(int(limit), 200))]
 
+    def get_public_work(self, work_id: str) -> dict[str, Any] | None:
+        normalized_work_id = _clean(work_id)
+        if not normalized_work_id:
+            return None
+        items = self.storage.load_public_works()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if _clean(item.get("id")) != normalized_work_id or not _clean(item.get("image_url")):
+                continue
+            return self._public_item(item)
+        return None
+
     def publish(
         self,
         *,

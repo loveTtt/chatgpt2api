@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 
 from services.public_work_service import public_work_service
@@ -13,5 +13,12 @@ def create_router() -> APIRouter:
     async def list_public_works(limit: int = Query(default=60, ge=1, le=200)):
         items = await run_in_threadpool(public_work_service.list_public_works, limit)
         return {"items": items}
+
+    @router.get("/api/public-works/{work_id}")
+    async def get_public_work(work_id: str):
+        item = await run_in_threadpool(public_work_service.get_public_work, work_id)
+        if not item:
+            raise HTTPException(status_code=404, detail={"error": "public work not found"})
+        return {"item": item}
 
     return router
