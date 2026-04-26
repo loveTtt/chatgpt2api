@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowUp, Check, ChevronDown, ImagePlus, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ImagePlus, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObject } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -69,6 +70,7 @@ export function ImageComposer({
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [isSizeMenuOpen, setIsSizeMenuOpen] = useState(false);
+  const [isQuickPromptDialogOpen, setIsQuickPromptDialogOpen] = useState(false);
   const [customQuickPrompts, setCustomQuickPrompts] = useState<CustomQuickPrompt[]>([]);
   const sizeMenuRef = useRef<HTMLDivElement>(null);
   const lightboxImages = useMemo(
@@ -108,6 +110,7 @@ export function ImageComposer({
 
   const handleApplyQuickPrompt = (value: string) => {
     onPromptChange(value);
+    setIsQuickPromptDialogOpen(false);
     toast.success("已应用快捷提示词");
     textareaRef.current?.focus();
   };
@@ -132,12 +135,22 @@ export function ImageComposer({
           }}
         />
 
-        <QuickPromptSection
-          builtinItems={builtinQuickPrompts}
-          customItems={customQuickPrompts}
-          onApply={handleApplyQuickPrompt}
-          onRemove={handleRemoveCustomQuickPrompt}
-        />
+        <Dialog open={isQuickPromptDialogOpen} onOpenChange={setIsQuickPromptDialogOpen}>
+          <DialogContent className="w-[min(92vw,760px)] rounded-[32px] border-stone-200 bg-[#f8f3ec] p-0 shadow-[0_36px_120px_-45px_rgba(16,24,40,0.45)]">
+            <DialogHeader className="border-b border-stone-200/80 px-6 pt-6 pb-4">
+              <DialogTitle className="text-2xl tracking-tight text-stone-950">快捷提示词</DialogTitle>
+            </DialogHeader>
+            <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+              <QuickPromptSection
+                builtinItems={builtinQuickPrompts}
+                customItems={customQuickPrompts}
+                onApply={handleApplyQuickPrompt}
+                onRemove={handleRemoveCustomQuickPrompt}
+                embedded
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {referenceImages.length > 0 ? (
           <div className="mb-3 flex flex-wrap gap-2 px-1">
@@ -275,6 +288,16 @@ export function ImageComposer({
                     ) : null}
                   </div>
 
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    onClick={() => setIsQuickPromptDialogOpen(true)}
+                  >
+                    <Sparkles className="size-3.5 sm:size-4" />
+                    <span>快捷提示词</span>
+                  </Button>
+
                   <label className="flex cursor-pointer items-center gap-2 rounded-full border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-700 transition hover:border-stone-300 sm:px-3 sm:py-2 sm:text-xs">
                     <input
                       type="checkbox"
@@ -309,14 +332,16 @@ function QuickPromptSection({
   customItems,
   onApply,
   onRemove,
+  embedded = false,
 }: {
   builtinItems: QuickPromptItem[];
   customItems: CustomQuickPrompt[];
   onApply: (prompt: string) => void;
   onRemove: (id: string) => void;
+  embedded?: boolean;
 }) {
   return (
-    <div className="mb-3 rounded-[28px] border border-stone-200 bg-white/80 p-4 sm:p-5">
+    <div className={cn(!embedded && "mb-3 rounded-[28px] border border-stone-200 bg-white/80 p-4 sm:p-5")}>
       <div className="space-y-4">
         <QuickPromptGroup title="公共参考" items={builtinItems} onApply={onApply} />
         <QuickPromptGroup title="我的快捷提示词" items={customItems} onApply={onApply} onRemove={onRemove} emptyText="还没有添加快捷提示词，可从作品详情页加入。" />
