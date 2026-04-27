@@ -4,8 +4,8 @@ import "./globals.css";
 import { TopNav } from "@/components/top-nav";
 
 export const metadata: Metadata = {
-  title: "ChatGPT 号池管理",
-  description: "ChatGPT account pool management dashboard",
+  title: "公益生图",
+  description: "ChatGPT image workspace and account dashboard",
 };
 
 export default function RootLayout({
