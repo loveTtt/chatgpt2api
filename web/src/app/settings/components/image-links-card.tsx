@@ -30,6 +30,7 @@ type EditFormState = {
   quotaMode: ImageLinkQuotaMode;
   publicFreeLimit: string;
   publicFreeUsed: string;
+  concurrencyLimit: string;
   expiresAt: string;
 };
 
@@ -97,6 +98,7 @@ export function ImageLinksCard() {
   const [quotaLimit, setQuotaLimit] = useState("10");
   const [quotaMode, setQuotaMode] = useState<ImageLinkQuotaMode>("one_time");
   const [publicFreeLimit, setPublicFreeLimit] = useState("20");
+  const [concurrencyLimit, setConcurrencyLimit] = useState("10");
   const [createCount, setCreateCount] = useState("1");
   const [expiresAt, setExpiresAt] = useState("");
   const [isCreating, setIsCreating] = useState(false);
@@ -158,6 +160,7 @@ export function ImageLinksCard() {
     setQuotaLimit("10");
     setQuotaMode("one_time");
     setPublicFreeLimit("20");
+    setConcurrencyLimit("10");
     setCreateCount("1");
     setExpiresAt("");
   };
@@ -173,6 +176,11 @@ export function ImageLinksCard() {
       toast.error("公开免扣额度不能小于 0");
       return;
     }
+    const normalizedConcurrencyLimit = Number.parseInt(concurrencyLimit, 10);
+    if (!Number.isFinite(normalizedConcurrencyLimit) || normalizedConcurrencyLimit < 1) {
+      toast.error("并发上限必须大于 0");
+      return;
+    }
     const normalizedCreateCount = Number.parseInt(createCount, 10);
     if (!Number.isFinite(normalizedCreateCount) || normalizedCreateCount < 1 || normalizedCreateCount > MAX_CREATE_COUNT) {
       toast.error(`生成数量必须在 1 到 ${MAX_CREATE_COUNT} 之间`);
@@ -186,6 +194,7 @@ export function ImageLinksCard() {
         quota_limit: normalizedQuotaLimit,
         quota_mode: quotaMode,
         public_free_limit: normalizedPublicFreeLimit,
+        concurrency_limit: normalizedConcurrencyLimit,
         expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
         count: normalizedCreateCount,
       });
@@ -211,6 +220,7 @@ export function ImageLinksCard() {
       quotaMode: item.quota_mode,
       publicFreeLimit: String(item.public_free_limit),
       publicFreeUsed: String(item.public_free_used),
+      concurrencyLimit: String(item.concurrency_limit || 10),
       expiresAt: formatDateTimeInput(item.expires_at),
     });
     setIsEditDialogOpen(true);
@@ -224,6 +234,7 @@ export function ImageLinksCard() {
     const normalizedQuotaUsed = Number.parseInt(editForm.quotaUsed, 10);
     const normalizedPublicFreeLimit = Number.parseInt(editForm.publicFreeLimit, 10);
     const normalizedPublicFreeUsed = Number.parseInt(editForm.publicFreeUsed, 10);
+    const normalizedConcurrencyLimit = Number.parseInt(editForm.concurrencyLimit, 10);
     if (!Number.isFinite(normalizedQuotaLimit) || normalizedQuotaLimit < 1) {
       toast.error("额度上限必须大于 0");
       return;
@@ -240,6 +251,10 @@ export function ImageLinksCard() {
       toast.error("公开免扣已用额度不能小于 0");
       return;
     }
+    if (!Number.isFinite(normalizedConcurrencyLimit) || normalizedConcurrencyLimit < 1) {
+      toast.error("并发上限必须大于 0");
+      return;
+    }
 
     setIsEditing(true);
     try {
@@ -250,6 +265,7 @@ export function ImageLinksCard() {
         quota_mode: editForm.quotaMode,
         public_free_limit: normalizedPublicFreeLimit,
         public_free_used: normalizedPublicFreeUsed,
+        concurrency_limit: normalizedConcurrencyLimit,
         expires_at: editForm.expiresAt ? new Date(editForm.expiresAt).toISOString() : null,
       });
       setItems(data.items);
@@ -419,6 +435,9 @@ export function ImageLinksCard() {
                                 公开免扣剩余 {item.public_free_remaining}/{item.public_free_limit}
                               </Badge>
                               <Badge variant="secondary" className="rounded-md">
+                                并发上限 {item.concurrency_limit || 10}
+                              </Badge>
+                              <Badge variant="secondary" className="rounded-md">
                                 {item.quota_mode === "daily" ? "每日刷新" : "一次性"}
                               </Badge>
                             </div>
@@ -573,6 +592,18 @@ export function ImageLinksCard() {
                 </select>
               </div>
               <div className="space-y-2">
+                <label className="text-sm font-medium text-stone-700">并发上限</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={concurrencyLimit}
+                  onChange={(event) => setConcurrencyLimit(event.target.value)}
+                  className="h-11 rounded-xl border-stone-200 bg-white"
+                />
+              </div>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
                 <label className="text-sm font-medium text-stone-700">生成数量</label>
                 <Input
                   type="number"
@@ -583,15 +614,15 @@ export function ImageLinksCard() {
                   className="h-11 rounded-xl border-stone-200 bg-white"
                 />
               </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-stone-700">过期时间（可选）</label>
-              <Input
-                type="datetime-local"
-                value={expiresAt}
-                onChange={(event) => setExpiresAt(event.target.value)}
-                className="h-11 rounded-xl border-stone-200 bg-white"
-              />
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-stone-700">过期时间（可选）</label>
+                <Input
+                  type="datetime-local"
+                  value={expiresAt}
+                  onChange={(event) => setExpiresAt(event.target.value)}
+                  className="h-11 rounded-xl border-stone-200 bg-white"
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>
@@ -690,6 +721,16 @@ export function ImageLinksCard() {
                     <option value="one_time">一次性额度</option>
                     <option value="daily">每日刷新</option>
                   </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-stone-700">并发上限</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={editForm.concurrencyLimit}
+                    onChange={(event) => setEditForm((current) => (current ? { ...current, concurrencyLimit: event.target.value } : current))}
+                    className="h-11 rounded-xl border-stone-200 bg-white"
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-stone-700">过期时间（可选）</label>

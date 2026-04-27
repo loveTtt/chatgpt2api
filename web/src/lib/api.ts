@@ -112,6 +112,7 @@ export type ImageLink = {
   quota_used: number;
   quota_remaining: number;
   quota_mode: ImageLinkQuotaMode;
+  concurrency_limit: number;
   public_free_limit: number;
   public_free_used: number;
   public_free_remaining: number;
@@ -127,6 +128,30 @@ export type ImageResponseItem = {
   b64_json: string;
   revised_prompt?: string;
   title?: string;
+};
+
+export type ImageResponse = {
+  created: number;
+  data: ImageResponseItem[];
+};
+
+export type ImageQueueResponse = {
+  queued: true;
+  ticket_id: string;
+  status: "queued" | "running";
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ImageQueueStatus = {
+  ticket_id: string;
+  status: "queued" | "running" | "completed" | "error";
+  position: number;
+  created_at: string;
+  updated_at: string;
+  result?: ImageResponse;
+  error?: string;
 };
 
 export async function login(authKey: string) {
@@ -184,7 +209,7 @@ export async function updateAccount(
 }
 
 export async function generateImage(prompt: string, model?: ImageModel, size?: string, options: ImageRequestOptions = {}) {
-  return httpRequest<{ created: number; data: ImageResponseItem[] }>(
+  return httpRequest<ImageResponse | ImageQueueResponse>(
     "/v1/images/generations",
     {
       method: "POST",
@@ -223,13 +248,18 @@ export async function editImage(files: File | File[], prompt: string, model?: Im
   }
   formData.append("n", "1");
 
-  return httpRequest<{ created: number; data: ImageResponseItem[] }>(
+  return httpRequest<ImageResponse | ImageQueueResponse>(
     "/v1/images/edits",
     {
       method: "POST",
       body: formData,
     },
   );
+}
+
+
+export async function fetchImageQueueStatus(ticketId: string) {
+  return httpRequest<ImageQueueStatus>(`/api/image-queue/${encodeURIComponent(ticketId)}`);
 }
 
 export async function fetchPublicWorks(limit = 60, options: { redirectOnUnauthorized?: boolean } = {}) {
@@ -295,6 +325,7 @@ export async function createImageLink(payload: {
   quota_limit: number;
   quota_mode?: ImageLinkQuotaMode;
   public_free_limit?: number;
+  concurrency_limit?: number;
   expires_at?: string | null;
   count?: number;
 }) {
@@ -314,6 +345,7 @@ export async function updateImageLink(
     quota_mode?: ImageLinkQuotaMode;
     public_free_limit?: number;
     public_free_used?: number;
+    concurrency_limit?: number;
     expires_at?: string | null;
   },
 ) {

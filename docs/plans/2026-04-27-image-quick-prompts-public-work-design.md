@@ -194,7 +194,6 @@ file_size_bytes?: number;
 需要保证以下存储后端都兼容：
 
 - JSON 存储
-- Git 存储
 - 数据库存储
 
 ## 受影响文件
@@ -215,7 +214,6 @@ file_size_bytes?: number;
 - `services/chatgpt_service.py`（若复用模型调用能力）
 - `services/storage/base.py`
 - `services/storage/json_storage.py`
-- `services/storage/git_storage.py`
 - `services/storage/database_storage.py`
 
 ## 兼容性与风险

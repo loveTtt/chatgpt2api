@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObje
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   builtinQuickPrompts,
@@ -22,7 +21,6 @@ import type { ImageConversationMode } from "@/store/image-conversations";
 type ImageComposerProps = {
   mode: ImageConversationMode;
   prompt: string;
-  imageCount: string;
   imageSize: string;
   isPublic: boolean;
   availableQuota: string;
@@ -30,7 +28,6 @@ type ImageComposerProps = {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onPromptChange: (value: string) => void;
-  onImageCountChange: (value: string) => void;
   onImageSizeChange: (value: string) => void;
   onPublicChange: (value: boolean) => void;
   onSubmit: () => void | Promise<void>;
@@ -51,7 +48,6 @@ const imageSizeOptions = [
 export function ImageComposer({
   mode,
   prompt,
-  imageCount,
   imageSize,
   isPublic,
   availableQuota,
@@ -59,7 +55,6 @@ export function ImageComposer({
   textareaRef,
   fileInputRef,
   onPromptChange,
-  onImageCountChange,
   onImageSizeChange,
   onPublicChange,
   onSubmit,
@@ -234,19 +229,6 @@ export function ImageComposer({
 
                   <div className="rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:px-3 sm:py-2 sm:text-xs">
                     <span className="hidden xs:inline">剩余额度 </span>{availableQuota}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 sm:gap-2 sm:px-3 sm:py-1">
-                    <span className="text-[11px] font-medium text-stone-700 sm:text-sm">张数</span>
-                    <Input
-                      type="number"
-                      min="1"
-                      max="10"
-                      step="1"
-                      value={imageCount}
-                      onChange={(event) => onImageCountChange(event.target.value)}
-                      className="h-7 w-[40px] border-0 bg-transparent px-0 text-center text-xs font-medium text-stone-700 shadow-none focus-visible:ring-0 sm:h-8 sm:w-[64px] sm:text-sm"
-                    />
                   </div>
 
                   <div ref={sizeMenuRef} className="relative">

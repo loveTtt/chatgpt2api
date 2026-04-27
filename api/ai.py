@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.support import (
@@ -15,6 +15,7 @@ from api.support import (
 from services.account_service import account_service
 from services.auth_service import auth_service
 from services.chatgpt_service import ChatGPTService, ImageGenerationError
+from services.image_queue_service import image_queue_service
 from services.public_work_service import public_work_service
 from utils.helper import is_image_chat_request, sse_json_stream
 
@@ -50,9 +51,20 @@ class ResponseCreateRequest(BaseModel):
     stream: bool | None = None
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return default
+
+
 def _ensure_image_link_quota(identity: dict[str, object], count: int, *, use_public_free: bool = False) -> dict[str, int]:
     try:
-        return auth_service.allocate_image_link_usage(identity, count, use_public_free=use_public_free)
+        plan = auth_service.allocate_image_link_usage(identity, count, use_public_free=use_public_free)
+        return {
+            "public_free_count": _safe_int(plan.get("public_free_count")),
+            "quota_count": _safe_int(plan.get("quota_count")),
+        }
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail={"error": str(exc)}) from exc
     except PermissionError as exc:
@@ -87,10 +99,48 @@ def _consume_image_link_quota(identity: dict[str, object], result: object, usage
     success_count = _count_success_images(result)
     if success_count <= 0:
         return
-    public_free_count = min(success_count, max(0, int(usage_plan.get("public_free_count", 0))))
-    quota_count = min(success_count - public_free_count, max(0, int(usage_plan.get("quota_count", 0))))
+    public_free_count = min(success_count, max(0, _safe_int(usage_plan.get("public_free_count"))))
+    quota_count = min(success_count - public_free_count, max(0, _safe_int(usage_plan.get("quota_count"))))
     auth_service.consume_image_link_usage(identity, public_free_count=public_free_count, quota_count=quota_count)
 
+
+def _image_link_concurrency_limit(identity: dict[str, object]) -> int:
+    return max(1, _safe_int(identity.get("concurrency_limit"), 10))
+
+
+def _image_queue_response(queued: dict[str, object] | None) -> JSONResponse | None:
+    if queued is None:
+        return None
+    return JSONResponse(status_code=202, content=queued)
+
+
+def _image_queue_status(ticket_id: str, identity: dict[str, object]) -> dict[str, object] | None:
+    return image_queue_service.get_status(
+        ticket_id,
+        link_id=str(identity.get("id") or "") if is_image_link_identity(identity) else None,
+        is_admin=identity.get("role") == "admin",
+    )
+
+
+def _run_with_image_link_queue(
+    identity: dict[str, object],
+    operation,
+) -> object | JSONResponse:
+    if not is_image_link_identity(identity):
+        return operation()
+    permit, queued = image_queue_service.enter_or_enqueue(
+        link_id=str(identity.get("id") or ""),
+        limit=_image_link_concurrency_limit(identity),
+        operation=operation,
+    )
+    queued_response = _image_queue_response(queued)
+    if queued_response is not None:
+        return queued_response
+    try:
+        return operation()
+    finally:
+        if permit is not None:
+            permit.release()
 
 def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
     public_work_service.set_title_generator(chatgpt_service.generate_public_work_title)
@@ -112,15 +162,12 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
     ):
         identity = require_image_access(authorization)
         use_public_free = body.is_public and body.is_prompt_public
-        usage_plan = _ensure_image_link_quota(identity, body.n, use_public_free=use_public_free)
         base_url = resolve_image_base_url(request)
         if body.stream:
             if is_image_link_identity(identity):
                 raise HTTPException(status_code=400, detail={"error": "image link cannot use streaming image generation"})
-            try:
-                await run_in_threadpool(account_service.get_available_access_token)
-            except RuntimeError as exc:
-                raise_image_quota_error(exc)
+            if not account_service.has_available_account():
+                raise_image_quota_error(RuntimeError("no available image quota"))
             return StreamingResponse(
                 sse_json_stream(
                     chatgpt_service.stream_image_generation(
@@ -129,13 +176,11 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 ),
                 media_type="text/event-stream",
             )
-        try:
-            result = await run_in_threadpool(
-                chatgpt_service.generate_with_pool, body.prompt, body.model, body.n, body.size, body.response_format, base_url
-            )
+        def operation():
+            usage_plan = _ensure_image_link_quota(identity, body.n, use_public_free=use_public_free)
+            result = chatgpt_service.generate_with_pool(body.prompt, body.model, body.n, body.size, body.response_format, base_url)
             if body.is_public:
-                created_items = await run_in_threadpool(
-                    public_work_service.publish,
+                created_items = public_work_service.publish(
                     result=result,
                     prompt=body.prompt,
                     source="generation",
@@ -146,6 +191,9 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 _apply_public_work_titles(result, created_items)
             _consume_image_link_quota(identity, result, usage_plan)
             return result
+
+        try:
+            return await run_in_threadpool(_run_with_image_link_queue, identity, operation)
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)
 
@@ -168,7 +216,6 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
         if n < 1 or n > 4:
             raise HTTPException(status_code=400, detail={"error": "n must be between 1 and 4"})
         use_public_free = is_public and is_prompt_public
-        usage_plan = _ensure_image_link_quota(identity, n, use_public_free=use_public_free)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
@@ -188,13 +235,11 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 sse_json_stream(chatgpt_service.stream_image_edit(prompt, images, model, n, size, response_format, base_url)),
                 media_type="text/event-stream",
             )
-        try:
-            result = await run_in_threadpool(
-                chatgpt_service.edit_with_pool, prompt, images, model, n, size, response_format, base_url
-            )
+        def operation():
+            usage_plan = _ensure_image_link_quota(identity, n, use_public_free=use_public_free)
+            result = chatgpt_service.edit_with_pool(prompt, images, model, n, size, response_format, base_url)
             if is_public:
-                created_items = await run_in_threadpool(
-                    public_work_service.publish,
+                created_items = public_work_service.publish(
                     result=result,
                     prompt=prompt,
                     source="edit",
@@ -205,8 +250,19 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
                 _apply_public_work_titles(result, created_items)
             _consume_image_link_quota(identity, result, usage_plan)
             return result
+
+        try:
+            return await run_in_threadpool(_run_with_image_link_queue, identity, operation)
         except ImageGenerationError as exc:
             raise_image_quota_error(exc)
+
+    @router.get("/api/image-queue/{ticket_id}")
+    async def get_image_queue_status(ticket_id: str, authorization: str | None = Header(default=None)):
+        identity = require_image_access(authorization)
+        status = _image_queue_status(ticket_id, identity)
+        if status is None:
+            raise HTTPException(status_code=404, detail={"error": "queue ticket not found"})
+        return status
 
     @router.post("/v1/chat/completions")
     async def create_chat_completion(body: ChatCompletionRequest, authorization: str | None = Header(default=None)):
@@ -216,10 +272,8 @@ def create_router(chatgpt_service: ChatGPTService) -> APIRouter:
         payload = body.model_dump(mode="python")
         if bool(payload.get("stream")):
             if is_image_chat_request(payload):
-                try:
-                    await run_in_threadpool(account_service.get_available_access_token)
-                except RuntimeError as exc:
-                    raise_image_quota_error(exc)
+                if not account_service.has_available_account():
+                    raise_image_quota_error(RuntimeError("no available image quota"))
             return StreamingResponse(
                 sse_json_stream(chatgpt_service.stream_chat_completion(payload)),
                 media_type="text/event-stream",

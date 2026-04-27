@@ -14,6 +14,7 @@ from services.storage.base import StorageBackend
 AuthRole = Literal["admin", "user"]
 ImageLinkQuotaMode = Literal["one_time", "daily"]
 DEFAULT_PUBLIC_FREE_LIMIT = 20
+DEFAULT_IMAGE_LINK_CONCURRENCY_LIMIT = 10
 
 
 def _now_iso() -> str:
@@ -74,6 +75,7 @@ class AuthService:
         quota_mode = self._normalize_quota_mode(item.get("quota_mode"))
         public_free_limit = max(0, self._safe_int(item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT))
         public_free_used = min(public_free_limit, max(0, self._safe_int(item.get("public_free_used"))))
+        concurrency_limit = max(1, self._safe_int(item.get("concurrency_limit"), DEFAULT_IMAGE_LINK_CONCURRENCY_LIMIT))
         quota_reset_date = self._clean(item.get("quota_reset_date")) or _current_reset_date()
         if quota_mode == "daily" and quota_reset_date != _current_reset_date():
             quota_used = 0
@@ -86,6 +88,7 @@ class AuthService:
                 "quota_limit": quota_limit,
                 "quota_used": quota_used,
                 "quota_mode": quota_mode,
+                "concurrency_limit": concurrency_limit,
                 "public_free_limit": public_free_limit,
                 "public_free_used": public_free_used,
                 "quota_reset_date": quota_reset_date,
@@ -93,7 +96,15 @@ class AuthService:
         )
         if any(
             item.get(key) != normalized.get(key)
-            for key in ("quota_limit", "quota_used", "quota_mode", "public_free_limit", "public_free_used", "quota_reset_date")
+            for key in (
+                "quota_limit",
+                "quota_used",
+                "quota_mode",
+                "concurrency_limit",
+                "public_free_limit",
+                "public_free_used",
+                "quota_reset_date",
+            )
         ):
             changed = True
         return normalized, changed
@@ -171,6 +182,10 @@ class AuthService:
             quota_used = AuthService._safe_int(item.get("quota_used"))
             public_free_limit = AuthService._safe_int(item.get("public_free_limit"), DEFAULT_PUBLIC_FREE_LIMIT)
             public_free_used = AuthService._safe_int(item.get("public_free_used"))
+            concurrency_limit = max(
+                1,
+                AuthService._safe_int(item.get("concurrency_limit"), DEFAULT_IMAGE_LINK_CONCURRENCY_LIMIT),
+            )
             result.update(
                 {
                     "scope": "image_link",
@@ -178,6 +193,7 @@ class AuthService:
                     "quota_used": quota_used,
                     "quota_remaining": max(0, quota_limit - quota_used),
                     "quota_mode": AuthService._normalize_quota_mode(item.get("quota_mode")),
+                    "concurrency_limit": concurrency_limit,
                     "public_free_limit": public_free_limit,
                     "public_free_used": public_free_used,
                     "public_free_remaining": max(0, public_free_limit - public_free_used),
@@ -233,6 +249,7 @@ class AuthService:
         created_by: str | None = None,
         quota_mode: ImageLinkQuotaMode = "one_time",
         public_free_limit: int = DEFAULT_PUBLIC_FREE_LIMIT,
+        concurrency_limit: int = DEFAULT_IMAGE_LINK_CONCURRENCY_LIMIT,
     ) -> tuple[dict[str, object], str]:
         normalized_quota = int(quota_limit)
         if normalized_quota < 1:
@@ -240,6 +257,9 @@ class AuthService:
         normalized_public_free_limit = int(public_free_limit)
         if normalized_public_free_limit < 0:
             raise ValueError("public_free_limit must be greater than or equal to 0")
+        normalized_concurrency_limit = int(concurrency_limit)
+        if normalized_concurrency_limit < 1:
+            raise ValueError("concurrency_limit must be greater than 0")
         normalized_name = self._clean(name) or "授权画图链接"
         raw_key = f"sk-img-{secrets.token_urlsafe(24)}"
         item = {
@@ -253,6 +273,7 @@ class AuthService:
             "quota_limit": normalized_quota,
             "quota_used": 0,
             "quota_mode": self._normalize_quota_mode(quota_mode),
+            "concurrency_limit": normalized_concurrency_limit,
             "public_free_limit": normalized_public_free_limit,
             "public_free_used": 0,
             "quota_reset_date": _current_reset_date(),
@@ -315,6 +336,12 @@ class AuthService:
                         if next_item["quota_mode"] == "daily":
                             next_item["quota_used"] = 0
                             next_item["public_free_used"] = 0
+                        changed = True
+                    if "concurrency_limit" in updates and updates.get("concurrency_limit") is not None:
+                        next_concurrency_limit = self._safe_int(updates.get("concurrency_limit"))
+                        if next_concurrency_limit < 1:
+                            raise ValueError("concurrency_limit must be greater than 0")
+                        next_item["concurrency_limit"] = next_concurrency_limit
                         changed = True
                     if "public_free_limit" in updates and updates.get("public_free_limit") is not None:
                         next_public_free_limit = self._safe_int(updates.get("public_free_limit"))

@@ -141,7 +141,7 @@ export function ImageResults({
                 <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-stone-500">
                   <span className="rounded-full bg-stone-100 px-3 py-1">{turn.count} 张</span>
                   {turn.status === "queued" ? (
-                    <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">等待当前对话中的前序任务完成</span>
+                    <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">{getQueueMessage(turn.queuePosition)}</span>
                   ) : null}
                 </div>
 
@@ -220,7 +220,7 @@ export function ImageResults({
                               {turn.status === "queued" ? "正在排队" : "正在生成"}
                             </div>
                             <div className="text-sm leading-6 text-stone-500">
-                              {turn.status === "queued" ? "前序任务完成后会自动开始处理这张图片。" : "图片生成中，完成后会自动替换成结果图。"}
+                              {turn.status === "queued" ? getQueueDetailMessage(turn.queuePosition) : "图片生成中，完成后会自动替换成结果图。"}
                             </div>
                           </div>
                         </div>
@@ -241,6 +241,20 @@ export function ImageResults({
       })}
     </div>
   );
+}
+
+function getQueueMessage(position?: number) {
+  if (typeof position === "number") {
+    return `当前请求过多，已在排队，前面还有 ${Math.max(0, position - 1)} 个请求`;
+  }
+  return "等待当前对话中的前序任务完成";
+}
+
+function getQueueDetailMessage(position?: number) {
+  if (typeof position === "number") {
+    return `轮到后会自动开始处理这张图片，前面还有 ${Math.max(0, position - 1)} 个请求。`;
+  }
+  return "前序任务完成后会自动开始处理这张图片。";
 }
 
 function buildImageCardClassName(size: string, baseClassName: string) {

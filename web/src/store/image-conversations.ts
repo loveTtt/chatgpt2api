@@ -36,6 +36,7 @@ export type ImageTurn = {
   isPublic?: boolean;
   isPromptPublic?: boolean;
   error?: string;
+  queuePosition?: number;
 };
 
 export type ImageConversation = {
@@ -141,6 +142,7 @@ function normalizeTurn(turn: ImageTurn & Record<string, unknown>): ImageTurn {
     isPublic: turn.isPublic === true,
     isPromptPublic: turn.isPromptPublic === true,
     error: typeof turn.error === "string" ? turn.error : undefined,
+    queuePosition: typeof turn.queuePosition === "number" ? turn.queuePosition : undefined,
   };
 }
 

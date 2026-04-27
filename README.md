@@ -120,7 +120,6 @@ npm run dev
 - `json`：本地 JSON 文件（默认）
 - `sqlite`：本地 SQLite 数据库
 - `postgres`：外部 PostgreSQL
-- `git`：Git 私有仓库存储
 
 `docker-compose.local.yml` 给了一个 SQLite 示例：
 

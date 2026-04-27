@@ -44,14 +44,6 @@ def test_storage():
         else:
             print(f"数据库连接: 本地 SQLite (data/accounts.db)")
     
-    elif backend_type == "git":
-        repo_url = os.getenv("GIT_REPO_URL", "")
-        branch = os.getenv("GIT_BRANCH", "main")
-        file_path = os.getenv("GIT_FILE_PATH", "accounts.json")
-        print(f"Git 仓库: {repo_url}")
-        print(f"Git 分支: {branch}")
-        print(f"文件路径: {file_path}")
-    
     print("\n" + "=" * 60)
     
     try:

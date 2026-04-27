@@ -4,7 +4,6 @@
 
 用法：
   python scripts/migrate_storage.py --from json --to postgres
-  python scripts/migrate_storage.py --from postgres --to git
   python scripts/migrate_storage.py --export accounts.json
   python scripts/migrate_storage.py --import accounts.json
 """
@@ -102,34 +101,29 @@ def main():
 示例:
   # 从 JSON 迁移到 PostgreSQL
   python scripts/migrate_storage.py --from json --to postgres
-  
-  # 从 PostgreSQL 迁移到 Git
-  python scripts/migrate_storage.py --from postgres --to git
-  
+
   # 导出当前数据到 JSON 文件
   python scripts/migrate_storage.py --export backup.json
-  
+
   # 从 JSON 文件导入数据
   python scripts/migrate_storage.py --import backup.json
 
 环境变量:
-  STORAGE_BACKEND  - 存储后端类型 (json, sqlite, postgres, git)
+  STORAGE_BACKEND  - 存储后端类型 (json, sqlite, postgres)
   DATABASE_URL     - 数据库连接字符串
-  GIT_REPO_URL     - Git 仓库地址
-  GIT_TOKEN        - Git 访问令牌
         """
     )
     
     parser.add_argument(
         "--from",
         dest="from_backend",
-        choices=["json", "sqlite", "postgres", "git"],
+        choices=["json", "sqlite", "postgres"],
         help="源存储后端",
     )
     parser.add_argument(
         "--to",
         dest="to_backend",
-        choices=["json", "sqlite", "postgres", "git"],
+        choices=["json", "sqlite", "postgres"],
         help="目标存储后端",
     )
     parser.add_argument(

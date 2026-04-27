@@ -15,6 +15,7 @@ from PIL import Image
 
 from services.config import config
 from services.storage.base import StorageBackend
+from utils.log import logger
 
 PublicWorkSource = Literal["generation", "edit"]
 DEFAULT_PUBLIC_WORK_TITLE = "未命名作品"
@@ -37,13 +38,36 @@ class PublicWorkService:
     def set_title_generator(self, generator: Callable[[str, str], str]) -> None:
         self._title_generator = generator
 
-    def _generate_title(self, prompt: str, revised_prompt: str) -> str:
+    def _generate_title(self, prompt: str, revised_prompt: str, work_id: str = "") -> str:
         if not self._title_generator:
+            logger.info({
+                "event": "public_work_title_skip",
+                "reason": "title_generator_missing",
+                "work_id": work_id,
+            })
             return DEFAULT_PUBLIC_WORK_TITLE
+        logger.info({
+            "event": "public_work_title_generate_start",
+            "work_id": work_id,
+            "prompt_length": len(prompt or ""),
+            "revised_prompt_length": len(revised_prompt or ""),
+        })
         try:
             title = _clean(self._title_generator(prompt, revised_prompt))
-        except Exception:
+        except Exception as exc:
+            logger.warning({
+                "event": "public_work_title_generate_fail",
+                "work_id": work_id,
+                "error_type": exc.__class__.__name__,
+                "error": str(exc),
+            })
             return DEFAULT_PUBLIC_WORK_TITLE
+        logger.info({
+            "event": "public_work_title_generate_success",
+            "work_id": work_id,
+            "title": title or DEFAULT_PUBLIC_WORK_TITLE,
+            "fallback": not bool(title),
+        })
         return title or DEFAULT_PUBLIC_WORK_TITLE
 
     @staticmethod
@@ -118,6 +142,11 @@ class PublicWorkService:
         normalized_work_id = _clean(work_id)
         normalized_title = _clean(title)
         if not normalized_work_id or not normalized_title:
+            logger.info({
+                "event": "public_work_title_update_skip",
+                "work_id": normalized_work_id,
+                "reason": "empty_work_id_or_title",
+            })
             return False
         with self._lock:
             items = self.storage.load_public_works()
@@ -127,12 +156,24 @@ class PublicWorkService:
                     continue
                 current_title = _clean(item.get("title"))
                 if current_title and current_title != DEFAULT_PUBLIC_WORK_TITLE:
+                    logger.info({
+                        "event": "public_work_title_update_skip",
+                        "work_id": normalized_work_id,
+                        "reason": "title_already_set",
+                        "current_title": current_title,
+                    })
                     return False
                 item["title"] = normalized_title
                 updated = True
                 break
             if updated:
                 self.storage.save_public_works(items)
+            logger.info({
+                "event": "public_work_title_update_done",
+                "work_id": normalized_work_id,
+                "updated": updated,
+                "title": normalized_title,
+            })
             return updated
 
     def _backfill_public_work_titles(self, items: list[dict[str, Any]], prompt: str, revised_prompts: dict[str, str]) -> None:
@@ -143,7 +184,7 @@ class PublicWorkService:
             revised_prompt = _clean(revised_prompts.get(work_id))
             if not work_id:
                 continue
-            title = self._generate_title(prompt, revised_prompt)
+            title = self._generate_title(prompt, revised_prompt, work_id)
             if title == DEFAULT_PUBLIC_WORK_TITLE:
                 continue
             self._update_public_work_title(work_id, title)

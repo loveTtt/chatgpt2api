@@ -38,6 +38,7 @@ class ImageLinkCreateRequest(BaseModel):
     quota_limit: int = Field(default=1, ge=1)
     quota_mode: str = "one_time"
     public_free_limit: int = Field(default=20, ge=0)
+    concurrency_limit: int = Field(default=10, ge=1)
     expires_at: str | None = None
     count: int = Field(default=1, ge=1, le=100)
 
@@ -50,6 +51,7 @@ class ImageLinkUpdateRequest(BaseModel):
     quota_mode: str | None = None
     public_free_limit: int | None = Field(default=None, ge=0)
     public_free_used: int | None = Field(default=None, ge=0)
+    concurrency_limit: int | None = Field(default=None, ge=1)
     expires_at: str | None = None
 
 
@@ -172,6 +174,7 @@ def create_router() -> APIRouter:
                     quota_limit=body.quota_limit,
                     quota_mode=body.quota_mode,
                     public_free_limit=body.public_free_limit,
+                    concurrency_limit=body.concurrency_limit,
                     expires_at=body.expires_at,
                     created_by=str(admin.get("id") or ""),
                 )
@@ -197,6 +200,7 @@ def create_router() -> APIRouter:
                 "quota_mode": body.quota_mode,
                 "public_free_limit": body.public_free_limit,
                 "public_free_used": body.public_free_used,
+                "concurrency_limit": body.concurrency_limit,
                 "expires_at": body.expires_at,
             }.items()
             if value is not None

@@ -17,12 +17,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { editImage, fetchAccounts, generateImage, login, type Account } from "@/lib/api";
+import { editImage, fetchAccounts, fetchImageQueueStatus, generateImage, login, type Account, type ImageResponse } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import { setStoredAuthSession, type StoredAuthSession } from "@/store/auth";
 import {
   clearImageConversations,
   deleteImageConversation,
+  getImageConversationStats,
   listImageConversations,
   saveImageConversations,
   type ImageConversation,
@@ -173,6 +174,31 @@ async function recoverConversationHistory(items: ImageConversation[]) {
   return normalized;
 }
 
+function isQueuedImageResponse(data: ImageResponse | { queued?: boolean; ticket_id?: string }): data is { queued: true; ticket_id: string; position: number } {
+  return data.queued === true && typeof data.ticket_id === "string";
+}
+
+function buildQueueError(position: number) {
+  return `当前请求过多，已在排队，前面还有 ${Math.max(0, position - 1)} 个请求`;
+}
+
+async function waitForImageQueueResult(
+  ticketId: string,
+  onStatus: (status: { status: "queued" | "running" | "completed" | "error"; position: number }) => Promise<void>,
+): Promise<ImageResponse> {
+  while (true) {
+    const status = await fetchImageQueueStatus(ticketId);
+    await onStatus({ status: status.status, position: status.position });
+    if (status.status === "completed" && status.result) {
+      return status.result;
+    }
+    if (status.status === "error") {
+      throw new Error(status.error || "生成失败");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+  }
+}
+
 function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const isAdmin = session.role === "admin";
   const isImageLink = session.scope === "image_link";
@@ -183,7 +209,6 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imagePrompt, setImagePrompt] = useState("");
-  const [imageCount, setImageCount] = useState("1");
   const [imageMode, setImageMode] = useState<ImageConversationMode>("generate");
   const [imageSize, setImageSize] = useState("");
   const [isPublic, setIsPublic] = useState(false);
@@ -203,7 +228,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
 
-  const parsedCount = useMemo(() => Math.max(1, Math.min(10, Number(imageCount) || 1)), [imageCount]);
+  const parsedCount = 1;
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
@@ -401,7 +426,6 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
 
   const clearComposerInputs = useCallback(() => {
     setImagePrompt("");
-    setImageCount("1");
     setIsPublic(false);
     setIsPromptPublic(false);
     setReferenceImageFiles([]);
@@ -678,7 +702,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
 
         const tasks = pendingImages.map(async (pendingImage) => {
           try {
-            const data =
+            const response =
               queuedTurn.mode === "edit"
                 ? await editImage(referenceFiles, queuedTurn.prompt, queuedTurn.model, queuedTurn.size, {
                     isPublic: queuedTurn.isPublic,
@@ -688,6 +712,54 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
                     isPublic: queuedTurn.isPublic,
                     isPromptPublic: queuedTurn.isPromptPublic,
                   });
+            const data = isQueuedImageResponse(response)
+              ? await (async () => {
+                  await updateConversation(
+                    conversationId,
+                    (current) => {
+                      const conversation = current ?? snapshot;
+                      return {
+                        ...conversation,
+                        updatedAt: new Date().toISOString(),
+                        turns: conversation.turns.map((turn) =>
+                          turn.id === queuedTurn.id
+                            ? {
+                                ...turn,
+                                status: "queued",
+                                queuePosition: response.position,
+                                error: buildQueueError(response.position),
+                              }
+                            : turn,
+                        ),
+                      };
+                    },
+                    { persist: false },
+                  );
+                  return waitForImageQueueResult(response.ticket_id, async (status) => {
+                    await updateConversation(
+                      conversationId,
+                      (current) => {
+                        const conversation = current ?? snapshot;
+                        return {
+                          ...conversation,
+                          updatedAt: new Date().toISOString(),
+                          turns: conversation.turns.map((turn) =>
+                            turn.id === queuedTurn.id
+                              ? {
+                                  ...turn,
+                                  status: status.status === "running" ? "generating" : "queued",
+                                  queuePosition: status.position,
+                                  error: status.status === "queued" && status.position > 0 ? buildQueueError(status.position) : undefined,
+                                }
+                              : turn,
+                          ),
+                        };
+                      },
+                      { persist: false },
+                    );
+                  });
+                })()
+              : response;
             const first = data.data?.[0];
             if (!first?.b64_json) {
               throw new Error("未返回图片数据");
@@ -773,6 +845,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
                 ? {
                     ...turn,
                     status: failedCount > 0 ? "error" : "success",
+                    queuePosition: undefined,
                     error: failedCount > 0 ? `其中 ${failedCount} 张未成功生成` : undefined,
                   }
                 : turn,
@@ -976,7 +1049,6 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
           <ImageComposer
             mode={imageMode}
             prompt={imagePrompt}
-            imageCount={imageCount}
             imageSize={imageSize}
             isPublic={isPublic}
             availableQuota={availableQuota}
@@ -984,7 +1056,6 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             textareaRef={textareaRef}
             fileInputRef={fileInputRef}
             onPromptChange={setImagePrompt}
-            onImageCountChange={setImageCount}
             onImageSizeChange={setImageSize}
             onPublicChange={(checked) => {
               setIsPublic(checked);

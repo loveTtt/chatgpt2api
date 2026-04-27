@@ -577,7 +577,7 @@ class ChatGPTService:
         for index in range(1, n + 1):
             while True:
                 try:
-                    request_token = self.account_service.get_available_access_token()
+                    request_token = self.account_service.acquire_image_access_token()
                 except RuntimeError as exc:
                     last_error = str(exc)
                     logger.warning({
@@ -639,6 +639,8 @@ class ChatGPTService:
                         })
                         continue
                     break
+                finally:
+                    self.account_service.release_image_access_token(request_token)
 
         if not emitted:
             raise ImageGenerationError(last_error or "image generation failed")
@@ -672,7 +674,7 @@ class ChatGPTService:
         for index in range(1, n + 1):
             while True:
                 try:
-                    request_token = self.account_service.get_available_access_token()
+                    request_token = self.account_service.acquire_image_access_token()
                 except RuntimeError as exc:
                     last_error = str(exc)
                     logger.warning({
@@ -742,6 +744,8 @@ class ChatGPTService:
                         })
                         continue
                     raise ImageGenerationError(last_error or "image generation failed") from exc
+                finally:
+                    self.account_service.release_image_access_token(request_token)
 
     def edit_with_pool(
             self,
@@ -763,7 +767,7 @@ class ChatGPTService:
         for index in range(1, n + 1):
             while True:
                 try:
-                    request_token = self.account_service.get_available_access_token()
+                    request_token = self.account_service.acquire_image_access_token()
                 except RuntimeError as exc:
                     last_error = str(exc)
                     logger.warning({
@@ -822,6 +826,8 @@ class ChatGPTService:
                         })
                         continue
                     break
+                finally:
+                    self.account_service.release_image_access_token(request_token)
 
         if not image_items:
             raise ImageGenerationError(last_error or "image edit failed")
@@ -851,7 +857,7 @@ class ChatGPTService:
         for index in range(1, n + 1):
             while True:
                 try:
-                    request_token = self.account_service.get_available_access_token()
+                    request_token = self.account_service.acquire_image_access_token()
                 except RuntimeError as exc:
                     last_error = str(exc)
                     logger.warning({
@@ -923,6 +929,8 @@ class ChatGPTService:
                         })
                         continue
                     raise ImageGenerationError(last_error or "image edit failed") from exc
+                finally:
+                    self.account_service.release_image_access_token(request_token)
 
     @staticmethod
     def _stream_completion_response(result: dict[str, object]) -> Iterator[dict[str, object]]:
@@ -998,7 +1006,7 @@ class ChatGPTService:
         last_error = ""
         while True:
             try:
-                request_token = self.account_service.get_available_access_token()
+                request_token = self.account_service.acquire_image_access_token()
             except RuntimeError as exc:
                 raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
 
@@ -1044,6 +1052,8 @@ class ChatGPTService:
                     })
                     continue
                 raise HTTPException(status_code=502, detail={"error": last_error or "image generation failed"}) from exc
+            finally:
+                self.account_service.release_image_access_token(request_token)
 
     def _create_text_chat_completion(self, body: dict[str, object]) -> dict[str, object]:
         model = str(body.get("model") or "auto").strip() or "auto"
@@ -1058,14 +1068,19 @@ class ChatGPTService:
         prompt_text = str(prompt or "").strip()
         revised_text = str(revised_prompt or "").strip()
         if not prompt_text and not revised_text:
+            logger.info({
+                "event": "public_work_title_request_skip",
+                "reason": "empty_prompt",
+            })
             return "未命名作品"
 
         user_content = prompt_text
         if revised_text and revised_text != prompt_text:
             user_content = f"原始提示词：{prompt_text}\n优化后提示词：{revised_text}"
 
+        model = "gpt-5-3-mini"
         body = {
-            "model": "gpt-5-3-mini",
+            "model": model,
             "messages": [
                 {
                     "role": "system",
@@ -1078,11 +1093,28 @@ class ChatGPTService:
                 {"role": "user", "content": user_content},
             ],
         }
-        result = self.create_chat_completion(body)
+        logger.info({
+            "event": "public_work_title_request_start",
+            "model": model,
+            "text_token_available": bool(self._get_text_access_token()),
+            "prompt_length": len(prompt_text),
+            "revised_prompt_length": len(revised_text),
+            "user_content_length": len(user_content),
+        })
+        result = self._create_text_chat_completion(body)
         choices = result.get("choices") if isinstance(result, dict) else None
         first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
         message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
-        title = str(message.get("content") or "").strip().strip('"').strip("'").strip()
+        raw_title = str(message.get("content") or "")
+        title = raw_title.strip().strip('"').strip("'").strip()
+        logger.info({
+            "event": "public_work_title_request_done",
+            "model": result.get("model") if isinstance(result, dict) else model,
+            "choice_count": len(choices) if isinstance(choices, list) else 0,
+            "raw_title": raw_title,
+            "title": title or "未命名作品",
+            "fallback": not bool(title),
+        })
         return title or "未命名作品"
 
     def stream_chat_completion(self, body: dict[str, object]) -> Iterator[dict[str, object]]:

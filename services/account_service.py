@@ -5,7 +5,7 @@ import base64
 import hashlib
 import json
 from pathlib import Path
-from threading import Lock
+from threading import Condition, Lock
 from typing import Any
 from datetime import datetime
 
@@ -33,6 +33,8 @@ class AccountService:
     def __init__(self, storage_backend: StorageBackend):
         self.storage = storage_backend
         self._lock = Lock()
+        self._slot_condition = Condition(self._lock)
+        self._token_active_counts: dict[str, int] = {}
         self._index = 0
         self._accounts = self._load_accounts()
 
@@ -239,6 +241,34 @@ class AccountService:
             access_token = tokens[self._index % len(tokens)]
             self._index += 1
             return access_token
+
+    def acquire_image_access_token(self) -> str:
+        with self._slot_condition:
+            while True:
+                tokens = self._list_available_candidate_tokens()
+                if not tokens:
+                    raise RuntimeError("no available image quota")
+                for offset in range(len(tokens)):
+                    index = (self._index + offset) % len(tokens)
+                    access_token = tokens[index]
+                    if self._token_active_counts.get(access_token, 0) >= 3:
+                        continue
+                    self._index = index + 1
+                    self._token_active_counts[access_token] = self._token_active_counts.get(access_token, 0) + 1
+                    return access_token
+                self._slot_condition.wait()
+
+    def release_image_access_token(self, access_token: str) -> None:
+        normalized_token = self._clean_token(access_token)
+        if not normalized_token:
+            return
+        with self._slot_condition:
+            active_count = max(0, self._token_active_counts.get(normalized_token, 0) - 1)
+            if active_count:
+                self._token_active_counts[normalized_token] = active_count
+            else:
+                self._token_active_counts.pop(normalized_token, None)
+            self._slot_condition.notify_all()
 
     def refresh_account_state(self, access_token: str) -> dict | None:
         token_ref = anonymize_token(access_token)
