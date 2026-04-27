@@ -726,6 +726,24 @@ class OpenAIBackendAPI:
                 data.append({"url": self._save_image_bytes(response.content)})
         return {"created": int(time.time()), "data": data}
 
+    @staticmethod
+    def _reference_file_ids(references: list[Dict[str, Any]]) -> set[str]:
+        return {
+            file_id
+            for item in references
+            for file_id in [str(item.get("file_id") or "").strip()]
+            if file_id
+        }
+
+    @staticmethod
+    def _filter_result_file_ids(file_ids: list[str], reference_file_ids: set[str]) -> list[str]:
+        invalid_file_id_patterns = {"file_upload"}
+        return [
+            file_id
+            for file_id in file_ids
+            if file_id not in invalid_file_id_patterns and file_id not in reference_file_ids
+        ]
+
     def _run_image_task(self, prompt: str, model: str, size: str | None, images: Optional[list[str]] = None,
                         response_format: str = "url") -> Dict[str, Any]:
         """执行图片生成或图片编辑主流程。"""
@@ -739,6 +757,7 @@ class OpenAIBackendAPI:
             "image_count": len(images or []),
         })
         references = [self._upload_image(image, f"image_{idx}.png") for idx, image in enumerate(images or [], start=1)]
+        reference_file_ids = self._reference_file_ids(references)
         logger.debug({"event": "image_references_uploaded", "references": references})
         self._bootstrap()
         requirements = self._get_auth_chat_requirements()
@@ -758,13 +777,15 @@ class OpenAIBackendAPI:
         sse_result = self._parse_image_sse(sse)
         logger.debug({"event": "image_sse_result", "sse_result": sse_result})
         conversation_id = sse_result["conversation_id"]
-        file_ids = list(sse_result["file_ids"])
+        file_ids = self._filter_result_file_ids(list(sse_result["file_ids"]), reference_file_ids)
         sediment_ids = list(sse_result["sediment_ids"])
-        invalid_file_id_patterns = {"file_upload"}
-        file_ids = [fid for fid in file_ids if fid not in invalid_file_id_patterns]
         if conversation_id and not file_ids and not sediment_ids:
             polled_file_ids, polled_sediment_ids = self._poll_image_results(conversation_id)
-            file_ids.extend([item for item in polled_file_ids if item not in file_ids])
+            file_ids.extend([
+                item
+                for item in self._filter_result_file_ids(polled_file_ids, reference_file_ids)
+                if item not in file_ids
+            ])
             sediment_ids.extend([item for item in polled_sediment_ids if item not in sediment_ids])
             logger.debug({
                 "event": "image_polled_result",
@@ -952,6 +973,7 @@ class OpenAIBackendAPI:
         sediment_ids: list[str] = []
 
         references = [self._upload_image(image, f"image_{idx}.png") for idx, image in enumerate(images or [], start=1)]
+        reference_file_ids = self._reference_file_ids(references)
         self._bootstrap()
         requirements = self._get_auth_chat_requirements()
         final_prompt = self._build_image_prompt(prompt, size)
@@ -973,7 +995,7 @@ class OpenAIBackendAPI:
                 if not conversation_id:
                     conversation_id = self._extract_image_stream_conversation_id(payload)
                 new_file_ids, new_sediment_ids = self._extract_image_stream_ids(payload)
-                self._append_unique(file_ids, new_file_ids)
+                self._append_unique(file_ids, self._filter_result_file_ids(new_file_ids, reference_file_ids))
                 self._append_unique(sediment_ids, new_sediment_ids)
 
                 try:
@@ -1037,11 +1059,9 @@ class OpenAIBackendAPI:
         finally:
             sse.close()
 
-        invalid_file_id_patterns = {"file_upload"}
-        file_ids = [fid for fid in file_ids if fid not in invalid_file_id_patterns]
         if conversation_id and not file_ids and not sediment_ids:
             polled_file_ids, polled_sediment_ids = self._poll_image_results(conversation_id)
-            self._append_unique(file_ids, polled_file_ids)
+            self._append_unique(file_ids, self._filter_result_file_ids(polled_file_ids, reference_file_ids))
             self._append_unique(sediment_ids, polled_sediment_ids)
 
         urls = self._resolve_image_urls(conversation_id, file_ids, sediment_ids)
