@@ -210,6 +210,12 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   );
   const publicFreeRemainingLabel =
     isImageLink && publicFreeRemaining !== null ? String(Math.max(0, publicFreeRemaining)) : "0";
+  const promptPublicDialogDescription = isImageLink
+    ? `公开提示词可使用免扣除额度。当前剩余免扣除额度：${publicFreeRemainingLabel}`
+    : "公开提示词后，提示词会展示在作品页和分享详情里。";
+  const promptPublicDialogHint = isImageLink
+    ? "仅公开作品图片时，提示词不会展示在作品页和分享详情里，也不会消耗公开免扣额度。"
+    : "仅公开作品图片时，提示词不会展示在作品页和分享详情里。";
 
   useEffect(() => {
     conversationsRef.current = conversations;
@@ -836,7 +842,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
       return;
     }
 
-    if (isPublic && isImageLink) {
+    if (isPublic) {
       setIsPromptPublicDialogOpen(true);
       return;
     }
@@ -851,11 +857,11 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
           <DialogHeader className="gap-3">
             <DialogTitle>是否同时公开提示词？</DialogTitle>
             <DialogDescription className="text-sm leading-6 text-stone-500">
-              公开提示词可使用免扣除额度。当前剩余免扣除额度：{publicFreeRemainingLabel}
+              {promptPublicDialogDescription}
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-2xl bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-600">
-            仅公开作品图片时，提示词不会展示在作品页和分享详情里，也不会消耗公开免扣额度。
+            {promptPublicDialogHint}
           </div>
           <DialogFooter>
             <Button
